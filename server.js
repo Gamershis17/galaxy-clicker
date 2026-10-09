@@ -45,8 +45,147 @@ const RESERVED = (process.env.RESERVED_USERNAMES || 'cody,admin,galaxyclicker,sy
 // Shape: { players: {username: player}, warnings: [], alerts: [], admin_log: [],
 //          seq: { warnings: n, alerts: n, admin_log: n } }
 // Player: { username, points, clicks, created_at, last_seen, warn_count,
-//           click_power, auto_clickers, multiplier }
+//           total_earned, supernova_shards, supernovas, achievements[],
+//           upgrades: { <upgradeId>: level } }
+// Legacy fields (click_power, auto_clickers, multiplier) are migrated on load.
 const DB_FILE = path.join(DATA_DIR, 'db.json');
+
+// ---------- Game definitions ----------
+
+// 10 upgrades. Cost = round(baseCost * 1.15^level). No level cap.
+const UPGRADES = [
+  { id: 'stellar_gloves',  name: 'Stellar Gloves',      icon: '✦', short: '+1 per tap',      baseCost: 15,      tap: 1,     sec: 0     },
+  { id: 'nebula_collector',name: 'Nebula Collector',    icon: '◐', short: '+1 star / sec',    baseCost: 50,      tap: 0,     sec: 1     },
+  { id: 'comet_miner',     name: 'Comet Miner',         icon: '☄', short: '+8 stars / sec',    baseCost: 300,     tap: 0,     sec: 8     },
+  { id: 'quantum_fingers', name: 'Quantum Fingers',     icon: '✣', short: '+12 per tap',     baseCost: 900,     tap: 12,    sec: 0     },
+  { id: 'pulsar_engine',   name: 'Pulsar Engine',       icon: '◎', short: '+45 stars / sec',  baseCost: 1800,    tap: 0,     sec: 45    },
+  { id: 'star_forge',     name: 'Star Forge',          icon: '⬢', short: '+220 stars / sec', baseCost: 8500,    tap: 0,     sec: 220   },
+  { id: 'supernova_core', name: 'Supernova Core',      icon: '⬣', short: '+1,400 stars / sec',baseCost: 42000,   tap: 0,     sec: 1400  },
+  { id: 'void_tap',       name: 'Void Tap',            icon: '✧', short: '+180 per tap',     baseCost: 120000,  tap: 180,   sec: 0     },
+  { id: 'black_hole',     name: 'Black Hole Harvester',icon: '●', short: '+9,000 stars / sec',baseCost: 350000,  tap: 0,     sec: 9000  },
+  { id: 'galaxy_swarm',   name: 'Galaxy Swarm',        icon: '✹', short: '+55,000 stars / sec',baseCost: 2200000,tap: 0,     sec: 55000 },
+];
+const UPGRADE_MAP = Object.fromEntries(UPGRADES.map(u => [u.id, u]));
+function upgradeCost(def, level) {
+  return Math.max(1, Math.round(def.baseCost * Math.pow(1.15, level)));
+}
+// Total cost to buy `count` levels starting at `level`
+function bulkCost(def, level, count) {
+  let total = 0;
+  for (let i = 0; i < count; i++) total += upgradeCost(def, level + i);
+  return total;
+}
+// How many levels can be bought with `points` starting at `level` (for MAX buy)
+function maxAffordable(def, level, points) {
+  let count = 0, spent = 0;
+  for (;;) {
+    const c = upgradeCost(def, level + count);
+    if (spent + c > points || count >= 1000) break;
+    spent += c;
+    count++;
+  }
+  return { count, cost: spent };
+}
+
+// Ranks by all-time stars earned
+const RANKS = [
+  { name: 'Stargazer',      at: 0 },
+  { name: 'Nebula Walker',  at: 1000 },
+  { name: 'Star Captain',   at: 100000 },
+  { name: 'Galaxy Lord',    at: 10000000 },
+  { name: 'Cosmic Emperor', at: 1000000000 },
+];
+function rankFor(totalEarned) {
+  let r = RANKS[0], next = null;
+  for (let i = 0; i < RANKS.length; i++) {
+    if (totalEarned >= RANKS[i].at) r = RANKS[i];
+    else { next = RANKS[i]; break; }
+  }
+  return { rank: r, next };
+}
+
+// Achievements
+const ACHIEVEMENTS = [
+  { id: 'clicks_100',   name: '100 clicks' },
+  { id: 'clicks_1000',  name: '1,000 clicks' },
+  { id: 'earned_10k',   name: '10K earned' },
+  { id: 'earned_1m',    name: '1M earned' },
+  { id: 'upgrades_10',  name: '10 upgrades' },
+  { id: 'upgrades_50',  name: '50 upgrades' },
+  { id: 'supernova_1',  name: 'First supernova' },
+  { id: 'hold_100k',    name: 'Hold 100K stars' },
+];
+function totalUpgradeLevels(p) {
+  let n = 0;
+  for (const u of UPGRADES) n += (p.upgrades && p.upgrades[u.id]) || 0;
+  return n;
+}
+function checkAchievements(p) {
+  const have = new Set(p.achievements || []);
+  const earned = [];
+  const defs = [
+    ['clicks_100',  p.clicks >= 100],
+    ['clicks_1000', p.clicks >= 1000],
+    ['earned_10k',  (p.total_earned || 0) >= 10000],
+    ['earned_1m',   (p.total_earned || 0) >= 1000000],
+    ['upgrades_10', totalUpgradeLevels(p) >= 10],
+    ['upgrades_50', totalUpgradeLevels(p) >= 50],
+    ['supernova_1', (p.supernovas || 0) >= 1],
+    ['hold_100k',   p.points >= 100000],
+  ];
+  for (const [id, ok] of defs) {
+    if (ok && !have.has(id)) { have.add(id); earned.push(id); }
+  }
+  if (earned.length) {
+    p.achievements = [...have];
+    saveDb();
+  }
+  return earned;
+}
+
+// Derived stats: per-tap and per-second BEFORE session multipliers (combo/crit/stardust)
+function shardMultiplier(p) {
+  return 1 + ((p.supernova_shards || 0) * 0.10);
+}
+function baseTapPower(p) {
+  let bonus = 0;
+  for (const u of UPGRADES) bonus += ((p.upgrades && p.upgrades[u.id]) || 0) * u.tap;
+  return (1 + bonus) * shardMultiplier(p);
+}
+function basePerSecond(p) {
+  let bonus = 0;
+  for (const u of UPGRADES) bonus += ((p.upgrades && p.upgrades[u.id]) || 0) * u.sec;
+  return bonus * shardMultiplier(p);
+}
+function playerSnapshot(p) {
+  const rankInfo = rankFor(p.total_earned || 0);
+  return {
+    username: p.username,
+    points: p.points,
+    clicks: p.clicks,
+    totalEarned: p.total_earned || 0,
+    supernovaShards: p.supernova_shards || 0,
+    supernovas: p.supernovas || 0,
+    achievements: p.achievements || [],
+    rank: rankInfo.rank.name,
+    nextRank: rankInfo.next ? { name: rankInfo.next.name, at: rankInfo.next.at } : null,
+    multiplier: Math.round(shardMultiplier(p) * 100) / 100,
+    perClick: baseTapPower(p),
+    perSecond: basePerSecond(p),
+    upgrades: UPGRADES.map(u => {
+      const level = (p.upgrades && p.upgrades[u.id]) || 0;
+      return {
+        id: u.id, name: u.name, icon: u.icon, short: u.short,
+        level,
+        tapEach: u.tap, secEach: u.sec,
+        totalTap: level * u.tap,
+        totalSec: level * u.sec,
+        cost1: upgradeCost(u, level),
+        cost10: bulkCost(u, level, 10),
+      };
+    }),
+  };
+}
 
 function blankDb() {
   return {
@@ -62,10 +201,31 @@ function normalizePlayer(p) {
   if (p.points == null) p.points = 0;
   if (p.clicks == null) p.clicks = 0;
   if (p.warn_count == null) p.warn_count = 0;
-  // upgrade-system defaults for data written before upgrades existed
-  if (p.click_power == null) p.click_power = 1;
-  if (p.auto_clickers == null) p.auto_clickers = 0;
-  if (p.multiplier == null) p.multiplier = 1;
+  // supernova / prestige fields
+  if (p.total_earned == null) p.total_earned = p.points || 0;
+  if (p.supernova_shards == null) p.supernova_shards = 0;
+  if (p.supernovas == null) p.supernovas = 0;
+  if (!Array.isArray(p.achievements)) p.achievements = [];
+  // 10-upgrade system
+  if (!p.upgrades || typeof p.upgrades !== 'object') p.upgrades = {};
+  for (const u of UPGRADES) {
+    if (p.upgrades[u.id] == null) p.upgrades[u.id] = 0;
+  }
+  // migrate legacy upgrade system (click_power / auto_clickers / multiplier)
+  if (p.click_power != null || p.auto_clickers != null || p.multiplier != null) {
+    const cp = p.click_power || 1;
+    const ac = p.auto_clickers || 0;
+    const m = p.multiplier || 1;
+    // click_power Lv N = +N per tap; new base is 1 + stellar_gloves levels
+    if (cp > 1) p.upgrades.stellar_gloves = Math.max(p.upgrades.stellar_gloves, cp - 1);
+    // auto_clickers 1:1 to nebula_collector
+    if (ac > 0) p.upgrades.nebula_collector = Math.max(p.upgrades.nebula_collector, ac);
+    // multiplier -> supernova shards: x2=10, x5=40, x10=90 (+10% each)
+    if (m > 1) p.supernova_shards = Math.max(p.supernova_shards, Math.round((m - 1) * 10));
+    delete p.click_power;
+    delete p.auto_clickers;
+    delete p.multiplier;
+  }
   return p;
 }
 
@@ -143,35 +303,7 @@ function shutdown() {
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 
-// ---------- Upgrade costs ----------
-const clickPowerCost = (level) => Math.max(1, Math.round(50 * Math.pow(level, 1.5)));
-const autoClickerCost = (count) => Math.max(1, Math.round(100 * Math.pow(count + 1, 1.8)));
-const MULT_TIERS = [
-  { tier: 2, cost: 500 },
-  { tier: 5, cost: 5000 },
-  { tier: 10, cost: 25000 },
-];
-function nextMultiplier(current) {
-  for (const t of MULT_TIERS) if (t.tier > current) return t;
-  return null;
-}
-function upgradeSnapshot(player) {
-  const cp = player.click_power || 1;
-  const ac = player.auto_clickers || 0;
-  const m = player.multiplier || 1;
-  return {
-    clickPower: cp,
-    autoClickers: ac,
-    multiplier: m,
-    perClick: cp * m,
-    perSecond: ac * m,
-    costs: {
-      clickPower: clickPowerCost(cp),
-      autoClicker: autoClickerCost(ac),
-      multiplier: nextMultiplier(m), // {tier, cost} or null when maxed
-    },
-  };
-}
+// ---------- Upgrade helpers (legacy shims removed; see UPGRADES above) ----------
 
 // ---------- Helpers ----------
 function isValidUsername(name) {
@@ -287,17 +419,15 @@ app.post('/api/register', (req, res) => {
     return res.status(409).json({ error: 'Username is taken. Pick another.' });
   }
   const now = Date.now();
-  db.players[name] = normalizePlayer({
+  const fresh = normalizePlayer({
     username: name,
     points: 0,
     clicks: 0,
     created_at: now,
     last_seen: now,
     warn_count: 0,
-    click_power: 1,
-    auto_clickers: 0,
-    multiplier: 1,
   });
+  db.players[name] = fresh;
   saveDb();
   logAdmin('register', name, 'self-registered');
   res.json({ username: name, points: 0, clicks: 0 });
@@ -324,7 +454,7 @@ app.post('/api/click', (req, res) => {
       logAlert(name, 'malformed', `clientScore was ${String(clientScore)} (non-finite)`);
       return res.status(400).json({ error: 'Bad request.' });
     }
-    const passiveWindow = (player.auto_clickers || 0) * (player.multiplier || 1) * 20;
+    const passiveWindow = basePerSecond(player) * 20;
     const drift = Math.abs(clientScore - player.points);
     const tolerance = Math.max(50, Math.floor(player.points * 0.02)) + passiveWindow;
     if (drift > tolerance) {
@@ -344,10 +474,31 @@ app.post('/api/click', (req, res) => {
   }
 
   const now = Date.now();
-  const gain = (player.click_power || 1) * (player.multiplier || 1);
+  // Base gain; client applies crit (7% x5) and combo (up to x2) on top visually,
+  // but the SERVER is authoritative — it grants baseTapPower. Crit/combo are
+  // sent by the client as a claimed bonus which we validate within bounds.
+  const { crit, comboMult } = req.body || {};
+  let gain = baseTapPower(player);
+  let appliedMult = 1;
+  // Validate client-claimed combo: must be 1..2
+  if (comboMult !== undefined) {
+    if (!isFiniteNum(comboMult) || comboMult < 1 || comboMult > 2) {
+      logAlert(name, 'malformed', `comboMult was ${String(comboMult)}`);
+    } else {
+      appliedMult = comboMult;
+    }
+  }
+  // Validate client-claimed crit: must be boolean; server rolls its own 7%
+  // to prevent crit-spoofing — we use server-side roll as truth.
+  const serverCrit = Math.random() < 0.07;
+  if (serverCrit) appliedMult *= 5;
+  gain = Math.floor(gain * appliedMult);
+
   player.points += gain;
+  player.total_earned = (player.total_earned || 0) + gain;
   player.clicks += 1;
   player.last_seen = now;
+  const newAchievements = checkAchievements(player);
   saveDb();
 
   const warnings = unreadWarnings(name);
@@ -358,6 +509,9 @@ app.post('/api/click', (req, res) => {
     points: player.points,
     clicks: player.clicks,
     perClick: gain,
+    crit: serverCrit,
+    comboMult: appliedMult / (serverCrit ? 5 : 1),
+    newAchievements,
     warnings: warnings.map(w => ({ message: w.message, at: w.created_at })),
   });
 });
@@ -371,23 +525,20 @@ app.get('/api/leaderboard', (req, res) => {
   res.json({ leaders: rows });
 });
 
-// Player stats (public, read-only)
+// Player stats (public, read-only) — full snapshot for the new UI
 app.get('/api/player/:username', (req, res) => {
   const name = req.params.username;
   if (!isValidUsername(name)) return res.status(400).json({ error: 'Invalid username.' });
   const player = getPlayer(norm(name));
   if (!player) return res.status(404).json({ error: 'Player not found.' });
-  const rank = Object.values(db.players).filter(p => p.points > player.points).length + 1;
-  res.json(Object.assign({
-    username: player.username,
-    points: player.points,
-    clicks: player.clicks,
-    warnings: player.warn_count,
-    rank,
-  }, upgradeSnapshot(player)));
+  const leaderboardRank = Object.values(db.players).filter(p => p.points > player.points).length + 1;
+  const snap = playerSnapshot(player);
+  snap.leaderboardRank = leaderboardRank;
+  snap.warnings = player.warn_count;
+  res.json(snap);
 });
 
-// ----- Upgrade API (server-validated purchases, no cap on levels) -----
+// ----- Upgrade API: buy any of the 10 upgrades, x1 / x10 / MAX -----
 
 function validateBuyer(req, res) {
   const { username } = req.body || {};
@@ -406,8 +557,6 @@ function validateBuyer(req, res) {
 
 // Purchase helper: deduct cost and apply effect only if affordable.
 // Returns the fresh player row, or null if not enough points.
-// (Single-threaded Node: check-then-update with no awaits between is atomic,
-// matching the old conditional UPDATE ... WHERE points >= ?.)
 function atomicPurchase(name, cost, applyEffect) {
   const player = getPlayer(name);
   if (!player || player.points < cost) return null;
@@ -418,57 +567,70 @@ function atomicPurchase(name, cost, applyEffect) {
   return player;
 }
 
-// Buy +1 click power. Cost = round(50 * level^1.5), no cap.
-app.post('/api/upgrade/click', (req, res) => {
+// Buy upgrade levels. Body: { username, upgradeId, mode } where mode is
+// 1 (single), 10 (ten), or "max" (as many as affordable, up to 1000).
+app.post('/api/upgrade/buy', (req, res) => {
   const buyer = validateBuyer(req, res);
   if (!buyer) return;
   const { name, player } = buyer;
-  const level = player.click_power || 1;
-  const cost = clickPowerCost(level);
-  const updated = atomicPurchase(name, cost, (p) => { p.click_power = (p.click_power || 1) + 1; });
-  if (!updated) {
-    return res.status(400).json({ error: `Need ${cost.toLocaleString('en-US')} points for Click Power Lv ${level + 1}.` });
+  const { upgradeId, mode } = req.body || {};
+  const def = UPGRADE_MAP[upgradeId];
+  if (!def) {
+    logAlert(name, 'malformed', `unknown upgradeId ${String(upgradeId)}`);
+    return res.status(400).json({ error: 'Unknown upgrade.' });
   }
-  logAdmin('upgrade_click', name, `Lv ${level} -> ${updated.click_power}, cost ${cost}`);
-  res.json(Object.assign({ ok: true, points: updated.points }, upgradeSnapshot(updated)));
+  const level = (player.upgrades && player.upgrades[def.id]) || 0;
+  let count, cost;
+  if (mode === 'max') {
+    const r = maxAffordable(def, level, player.points);
+    count = r.count; cost = r.cost;
+  } else {
+    count = mode === 10 ? 10 : 1;
+    cost = bulkCost(def, level, count);
+  }
+  if (count < 1) {
+    return res.status(400).json({
+      error: `Need ${upgradeCost(def, level).toLocaleString('en-US')} stars for ${def.name} Lv ${level + 1}.`,
+    });
+  }
+  const updated = atomicPurchase(name, cost, (p) => {
+    if (!p.upgrades) p.upgrades = {};
+    p.upgrades[def.id] = ((p.upgrades[def.id]) || 0) + count;
+  });
+  if (!updated) {
+    return res.status(400).json({ error: `Need ${cost.toLocaleString('en-US')} stars.` });
+  }
+  const newAchievements = checkAchievements(updated);
+  logAdmin('upgrade_buy', name, `${def.id} x${count} (Lv ${level} -> ${level + count}), cost ${cost}`);
+  res.json(Object.assign({ ok: true, bought: count, newAchievements }, playerSnapshot(updated)));
 });
 
-// Buy one auto-clicker. Cost = round(100 * (count+1)^1.8), no cap.
-app.post('/api/upgrade/auto', (req, res) => {
+// ----- Supernova prestige -----
+// Requires 100K total stars earned. Grants floor(total_earned / 100K) shards
+// (+10% each, forever), then resets points/clicks/upgrades/total_earned.
+const SUPERNOVA_THRESHOLD = 100000;
+app.post('/api/supernova', (req, res) => {
   const buyer = validateBuyer(req, res);
   if (!buyer) return;
   const { name, player } = buyer;
-  const count = player.auto_clickers || 0;
-  const cost = autoClickerCost(count);
-  const updated = atomicPurchase(name, cost, (p) => { p.auto_clickers = (p.auto_clickers || 0) + 1; });
-  if (!updated) {
-    return res.status(400).json({ error: `Need ${cost.toLocaleString('en-US')} points for another auto-clicker.` });
+  const earned = player.total_earned || 0;
+  if (earned < SUPERNOVA_THRESHOLD) {
+    return res.status(400).json({
+      error: `Need ${(SUPERNOVA_THRESHOLD - earned).toLocaleString('en-US')} more stars earned to go supernova.`,
+    });
   }
-  logAdmin('upgrade_auto', name, `${count} -> ${updated.auto_clickers}, cost ${cost}`);
-  res.json(Object.assign({ ok: true, points: updated.points }, upgradeSnapshot(updated)));
-});
-
-// Buy the next multiplier tier (x2 -> x5 -> x10), one-time each.
-app.post('/api/upgrade/multiplier', (req, res) => {
-  const buyer = validateBuyer(req, res);
-  if (!buyer) return;
-  const { name, player } = buyer;
-  const { tier } = req.body || {};
-  const current = player.multiplier || 1;
-  const next = nextMultiplier(current);
-  if (!next) {
-    return res.status(400).json({ error: 'Already at max multiplier (x10).' });
-  }
-  if (tier !== undefined && tier !== next.tier) {
-    logAlert(name, 'malformed', `tried to buy multiplier tier ${String(tier)}, expected ${next.tier}`);
-    return res.status(400).json({ error: `Next multiplier is x${next.tier}.` });
-  }
-  const updated = atomicPurchase(name, next.cost, (p) => { p.multiplier = next.tier; });
-  if (!updated) {
-    return res.status(400).json({ error: `Need ${next.cost.toLocaleString('en-US')} points for x${next.tier} multiplier.` });
-  }
-  logAdmin('upgrade_multiplier', name, `x${current} -> x${next.tier}, cost ${next.cost}`);
-  res.json(Object.assign({ ok: true, points: updated.points }, upgradeSnapshot(updated)));
+  const shards = Math.floor(earned / SUPERNOVA_THRESHOLD);
+  player.supernova_shards = (player.supernova_shards || 0) + shards;
+  player.supernovas = (player.supernovas || 0) + 1;
+  player.points = 0;
+  player.clicks = 0;
+  player.total_earned = 0;
+  player.upgrades = {};
+  for (const u of UPGRADES) player.upgrades[u.id] = 0;
+  const newAchievements = checkAchievements(player);
+  saveDb();
+  logAdmin('supernova', name, `+${shards} shards (total ${player.supernova_shards}), supernovas: ${player.supernovas}`);
+  res.json(Object.assign({ ok: true, shardsGained: shards, newAchievements }, playerSnapshot(player)));
 });
 
 app.get('/api/status', (req, res) => {
@@ -497,6 +659,8 @@ app.post('/api/admin/give', requireAdmin, (req, res) => {
   const player = getPlayer(name);
   if (!player) return res.status(404).json({ error: 'Player not found.' });
   player.points += amount;
+  player.total_earned = (player.total_earned || 0) + amount;
+  checkAchievements(player);
   saveDb();
   logAdmin('give', name, `+${amount}`);
   res.json({ username: name, points: player.points });
@@ -511,8 +675,67 @@ app.post('/api/admin/reset', requireAdmin, (req, res) => {
   if (!player) return res.status(404).json({ error: 'Player not found.' });
   const was = player.points;
   player.points = 0;
+  // full reset wipes prestige too (matches "until full reset" on shards)
+  player.total_earned = 0;
+  player.clicks = 0;
+  player.supernova_shards = 0;
+  player.supernovas = 0;
+  player.achievements = [];
+  player.upgrades = {};
+  for (const u of UPGRADES) player.upgrades[u.id] = 0;
   saveDb();
-  logAdmin('reset', name, `was ${was}`);
+  logAdmin('reset', name, `was ${was} (full reset incl. prestige)`);
+  res.json({ username: name, points: 0 });
+});
+
+// Set a player's stars to an exact amount (also bumps total_earned so
+// ranks/supernova progress stay consistent)
+app.post('/api/admin/set-stars', requireAdmin, (req, res) => {
+  const { username, amount } = req.body || {};
+  if (!isValidUsername(username)) return res.status(400).json({ error: 'Invalid username.' });
+  if (!isFiniteNum(amount) || !Number.isInteger(amount) || amount < 0) {
+    return res.status(400).json({ error: 'Amount must be a non-negative whole number.' });
+  }
+  const name = norm(username);
+  const player = getPlayer(name);
+  if (!player) return res.status(404).json({ error: 'Player not found.' });
+  const was = player.points;
+  const diff = amount - was;
+  player.points = amount;
+  if (diff > 0) player.total_earned = (player.total_earned || 0) + diff;
+  checkAchievements(player);
+  saveDb();
+  logAdmin('set_stars', name, `${was} -> ${amount}`);
+  res.json({ username: name, points: player.points });
+});
+
+// Grant supernova shards directly
+app.post('/api/admin/shards', requireAdmin, (req, res) => {
+  const { username, amount } = req.body || {};
+  if (!isValidUsername(username)) return res.status(400).json({ error: 'Invalid username.' });
+  if (!isFiniteNum(amount) || !Number.isInteger(amount) || amount <= 0) {
+    return res.status(400).json({ error: 'Amount must be a positive whole number.' });
+  }
+  const name = norm(username);
+  const player = getPlayer(name);
+  if (!player) return res.status(404).json({ error: 'Player not found.' });
+  player.supernova_shards = (player.supernova_shards || 0) + amount;
+  saveDb();
+  logAdmin('shards', name, `+${amount} (total ${player.supernova_shards})`);
+  res.json({ username: name, shards: player.supernova_shards });
+});
+
+// Reset only stars (keeps upgrades, shards, achievements)
+app.post('/api/admin/reset-stars', requireAdmin, (req, res) => {
+  const { username } = req.body || {};
+  if (!isValidUsername(username)) return res.status(400).json({ error: 'Invalid username.' });
+  const name = norm(username);
+  const player = getPlayer(name);
+  if (!player) return res.status(404).json({ error: 'Player not found.' });
+  const was = player.points;
+  player.points = 0;
+  saveDb();
+  logAdmin('reset_stars', name, `was ${was}`);
   res.json({ username: name, points: 0 });
 });
 
@@ -584,15 +807,16 @@ app.get('/api/admin/players', requireAdmin, (req, res) => {
   res.json({ players: rows.slice(0, 50) });
 });
 
-// Passive income: every second, each player with auto-clickers earns
-// auto_clickers * multiplier points. Save is debounced (max 1 flush / 5s).
+// Passive income: every second, each player earns basePerSecond points.
+// Save is debounced (max 1 flush / 5s).
 setInterval(() => {
   try {
     let changed = false;
     for (const p of Object.values(db.players)) {
-      const ac = p.auto_clickers || 0;
-      if (ac > 0) {
-        p.points += ac * (p.multiplier || 1);
+      const income = Math.floor(basePerSecond(p));
+      if (income > 0) {
+        p.points += income;
+        p.total_earned = (p.total_earned || 0) + income;
         changed = true;
       }
     }
