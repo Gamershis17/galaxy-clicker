@@ -405,7 +405,7 @@
         const li = document.createElement('li');
         if (p.username === username) li.className = 'me';
         const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : (i + 1) + '.';
-        li.innerHTML = '<span>' + medal + ' ' + esc(p.username) + '</span><span class="pts">' + fmt(p.points) + '</span>';
+        li.innerHTML = '<span>' + medal + ' ' + esc(p.username) + '</span><span class="pts">' + fmt(p.clicks) + ' clicks</span>';
         board.appendChild(li);
       });
       if (!data.leaders.length) board.innerHTML = '<li class="muted">No clickers yet. Be the first!</li>';
