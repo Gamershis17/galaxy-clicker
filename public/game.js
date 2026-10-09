@@ -6,6 +6,7 @@
   const gate = $('gate'), game = $('game');
   const usernameInput = $('username-input'), playBtn = $('play-btn'), gateError = $('gate-error');
   const clicker = $('clicker'), pointsEl = $('points'), rankLine = $('rank-line');
+  const heroPoints = $('hero-points');
   const board = $('leaderboard'), warnBanner = $('warn-banner');
   const userChip = $('user-chip'), userChipName = $('user-chip-name');
 
@@ -14,8 +15,83 @@
   let clicking = false;
   let perClick = 1, perSecond = 0;
 
-  // ---------- animated starfield ----------
+  // ---------- big animated points tracker ----------
+  // Top score-card updates instantly; the hero number tweens toward it.
+  let displayedPoints = 0, tweenRaf = null;
+  function setPoints(v) {
+    v = Math.max(0, Math.floor(v) || 0);
+    pointsEl.textContent = fmt(v);
+    if (reducedMotion) {
+      displayedPoints = v;
+      heroPoints.textContent = fmt(v);
+      return;
+    }
+    if (tweenRaf) cancelAnimationFrame(tweenRaf);
+    const from = displayedPoints, start = performance.now();
+    const dur = Math.min(450, 140 + Math.abs(v - from) * 1.5);
+    function step(t) {
+      const k = Math.min(1, (t - start) / Math.max(1, dur));
+      const e = 1 - Math.pow(1 - k, 3);
+      displayedPoints = Math.round(from + (v - from) * e);
+      heroPoints.textContent = fmt(displayedPoints);
+      if (k < 1) tweenRaf = requestAnimationFrame(step);
+      else tweenRaf = null;
+    }
+    tweenRaf = requestAnimationFrame(step);
+    // little pop on increase
+    if (v > from) {
+      heroPoints.classList.remove('pop');
+      void heroPoints.offsetWidth;
+      heroPoints.classList.add('pop');
+    }
+  }
+
+  // ---------- animated galaxy background ----------
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const bg = $('bg'), galaxyEl = $('galaxy'), dustBox = $('dust');
+
+  // spiral galaxy texture: rendered once, rotated by cheap GPU CSS animation
+  (function buildGalaxy() {
+    try {
+      const S = 640, c = document.createElement('canvas');
+      c.width = c.height = S;
+      const g = c.getContext('2d');
+      const cx = S / 2, cy = S / 2;
+      // bright core
+      let rg = g.createRadialGradient(cx, cy, 0, cx, cy, 140);
+      rg.addColorStop(0, 'rgba(255,244,220,0.95)');
+      rg.addColorStop(0.25, 'rgba(255,214,150,0.55)');
+      rg.addColorStop(0.6, 'rgba(150,110,255,0.16)');
+      rg.addColorStop(1, 'rgba(150,110,255,0)');
+      g.fillStyle = rg;
+      g.fillRect(0, 0, S, S);
+      // three spiral arms, tilted for a dynamic angle
+      const arms = 3, per = 650;
+      for (let a = 0; a < arms; a++) {
+        for (let i = 0; i < per; i++) {
+          const t = i / per;
+          const ang = a * (Math.PI * 2 / arms) + t * 4.6;
+          const r = 26 + t * 285;
+          const spread = (1 - t) * 26 + 6;
+          const x = cx + Math.cos(ang) * r + (Math.random() - 0.5) * spread * 2;
+          const y = cy + Math.sin(ang) * r * 0.62 + (Math.random() - 0.5) * spread * 2;
+          const b = Math.random();
+          let col;
+          if (t < 0.3) col = 'rgba(255,225,170,' + (0.5 + b * 0.5).toFixed(2) + ')';
+          else if (t < 0.65) col = 'rgba(190,170,255,' + (0.3 + b * 0.45).toFixed(2) + ')';
+          else col = 'rgba(140,190,255,' + (0.15 + b * 0.35).toFixed(2) + ')';
+          g.fillStyle = col;
+          const sz = b > 0.92 ? 2.4 : 1.3;
+          g.fillRect(x, y, sz, sz);
+        }
+      }
+      galaxyEl.style.backgroundImage = 'url(' + c.toDataURL() + ')';
+    } catch (e) { /* canvas unavailable — nebulae carry the background */ }
+  })();
+
+  // ---------- animated starfield (multi-color twinkle) ----------
   const canvas = $('stars'), ctx = canvas.getContext('2d');
+  const STAR_COLORS = ['#dfe6ff', '#dfe6ff', '#ffffff', '#bfe3ff', '#ffe9b8', '#ffd6f5'];
   let stars = [];
   function sizeCanvas() {
     canvas.width = window.innerWidth;
@@ -26,17 +102,17 @@
       r: Math.random() * 1.6 + 0.3,
       tw: Math.random() * Math.PI * 2,
       sp: 0.5 + Math.random() * 1.5,
+      c: STAR_COLORS[(Math.random() * STAR_COLORS.length) | 0],
     }));
   }
   sizeCanvas();
   window.addEventListener('resize', sizeCanvas);
-  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   function drawStars(t) {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     for (const s of stars) {
       const a = reducedMotion ? 0.8 : 0.35 + 0.65 * Math.abs(Math.sin(t / 900 * s.sp + s.tw));
       ctx.globalAlpha = a;
-      ctx.fillStyle = '#dfe6ff';
+      ctx.fillStyle = s.c;
       ctx.beginPath();
       ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
       ctx.fill();
@@ -46,24 +122,69 @@
   }
   requestAnimationFrame(drawStars);
 
-  // occasional shooting star
+  // drifting dust motes (cheap CSS particles)
+  if (!reducedMotion && dustBox) {
+    for (let i = 0; i < 14; i++) {
+      const d = document.createElement('div');
+      d.className = 'mote';
+      const sz = 2 + Math.random() * 4;
+      d.style.width = sz + 'px';
+      d.style.height = sz + 'px';
+      d.style.left = (Math.random() * 100) + '%';
+      d.style.top = (Math.random() * 100) + '%';
+      d.style.animationDuration = (18 + Math.random() * 22).toFixed(1) + 's';
+      d.style.animationDelay = (-Math.random() * 30).toFixed(1) + 's';
+      d.style.setProperty('--dx', ((Math.random() - 0.5) * 130).toFixed(0) + 'px');
+      d.style.setProperty('--dy', ((Math.random() - 0.5) * 130).toFixed(0) + 'px');
+      dustBox.appendChild(d);
+    }
+  }
+
+  // dramatic shooting stars — more frequent, colored trails
   if (!reducedMotion) {
+    const TRAILS = [
+      'linear-gradient(90deg,#fff,rgba(160,220,255,0))',
+      'linear-gradient(90deg,#fff,rgba(255,210,130,0))',
+      'linear-gradient(90deg,#fff,rgba(200,170,255,0))',
+    ];
     setInterval(() => {
-      if (document.hidden || Math.random() < 0.45) return;
+      if (document.hidden || Math.random() < 0.3) return;
       const x0 = Math.random() * canvas.width * 0.7;
       const y0 = Math.random() * canvas.height * 0.35;
+      const w = 150 + Math.random() * 110;
       const el = document.createElement('div');
       el.className = 'shooting-star';
-      el.style.cssText = `position:fixed;z-index:1;left:${x0}px;top:${y0}px;width:120px;height:2px;` +
-        `background:linear-gradient(90deg,#fff,transparent);transform:rotate(-25deg);` +
-        `animation:shoot 0.7s ease-out forwards;pointer-events:none;`;
+      el.style.cssText = 'position:fixed;z-index:1;left:' + x0 + 'px;top:' + y0 + 'px;width:' + w + 'px;height:2px;' +
+        'background:' + TRAILS[(Math.random() * TRAILS.length) | 0] + ';transform:rotate(-25deg);' +
+        'box-shadow:0 0 10px rgba(255,255,255,0.9);' +
+        'animation:shoot 0.55s ease-out forwards;pointer-events:none;';
       document.body.appendChild(el);
-      setTimeout(() => el.remove(), 750);
-    }, 6000);
+      setTimeout(() => el.remove(), 600);
+    }, 2800);
   }
   const style = document.createElement('style');
-  style.textContent = '@keyframes shoot{from{opacity:1;transform:rotate(-25deg) translateX(0)}to{opacity:0;transform:rotate(-25deg) translateX(-260px)}}';
+  style.textContent = '@keyframes shoot{from{opacity:1;transform:rotate(-25deg) translateX(0)}to{opacity:0;transform:rotate(-25deg) translateX(-320px)}}';
   document.head.appendChild(style);
+
+  // gentle parallax on mouse / device tilt (GPU transform on one wrapper)
+  if (!reducedMotion && bg) {
+    let tx = 0, ty = 0, cx = 0, cy = 0;
+    window.addEventListener('pointermove', (e) => {
+      tx = e.clientX / window.innerWidth - 0.5;
+      ty = e.clientY / window.innerHeight - 0.5;
+    }, { passive: true });
+    window.addEventListener('deviceorientation', (e) => {
+      if (e.gamma == null || e.beta == null) return;
+      tx = Math.max(-1, Math.min(1, e.gamma / 28));
+      ty = Math.max(-1, Math.min(1, (e.beta - 45) / 28));
+    }, { passive: true });
+    (function parallax() {
+      cx += (tx - cx) * 0.05;
+      cy += (ty - cy) * 0.05;
+      bg.style.transform = 'translate3d(' + (cx * 20).toFixed(1) + 'px,' + (cy * 20).toFixed(1) + 'px,0)';
+      requestAnimationFrame(parallax);
+    })();
+  }
 
   // ---------- helpers ----------
   async function api(path, opts) {
@@ -133,7 +254,7 @@
     game.classList.remove('hidden');
     userChip.classList.remove('hidden');
     userChipName.textContent = username;
-    pointsEl.textContent = fmt(points);
+    setPoints(points);
     refreshBoard();
     refreshMe();
   }
@@ -156,7 +277,7 @@
       .then((data) => {
         points = data.points;
         if (data.perClick) perClick = data.perClick;
-        pointsEl.textContent = fmt(points);
+        setPoints(points);
         floatPlus(e.clientX, e.clientY, data.perClick || 1);
         showWarnings(data.warnings);
       })
@@ -193,7 +314,7 @@
     try {
       const p = await api('/api/player/' + encodeURIComponent(username));
       points = p.points;
-      pointsEl.textContent = fmt(points);
+      setPoints(points);
       rankLine.textContent = p.rank ? `Rank #${p.rank} · ${fmt(p.clicks)} clicks` : '';
       if (p.perClick) perClick = p.perClick;
       if (typeof p.perSecond === 'number') perSecond = p.perSecond;
@@ -246,7 +367,7 @@
     try {
       const data = await api(path, { method: 'POST', body: JSON.stringify({ username }) });
       points = data.points;
-      pointsEl.textContent = fmt(points);
+      setPoints(points);
       perClick = data.perClick;
       perSecond = data.perSecond;
       renderUpgrades(data);
