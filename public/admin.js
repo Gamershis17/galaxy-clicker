@@ -81,23 +81,36 @@
     playerCard.innerHTML = `
       <div class="p-name">${esc(p.username)}</div>
       <div class="p-stats">
-        <span>⭐ <b>${fmt(p.points)}</b> pts</span>
+        <span>⭐ <b>${fmt(p.points)}</b> stars</span>
+        <span>🌌 <b>${fmt(p.totalEarned || 0)}</b> earned</span>
         <span>👆 <b>${fmt(p.clicks)}</b> clicks</span>
-        <span>🏅 rank <b>#${p.rank}</b></span>
+        <span>💠 <b>${fmt(p.supernovaShards || 0)}</b> shards</span>
+        <span>💥 <b>${fmt(p.supernovas || 0)}</b> novas</span>
+        <span>🏅 <b>${esc(p.rank || '')}</b></span>
         <span>⚠️ <b>${p.warnings}</b> warns</span>
       </div>
       <div class="admin-actions">
-        <label>Give points (no cap)</label>
+        <label>Give stars (no cap)</label>
         <div class="action-row">
           <input id="give-amt" type="number" min="1" step="1" placeholder="amount" inputmode="numeric">
           <button id="give-btn" type="button">Give</button>
+        </div>
+        <label>Set stars (exact)</label>
+        <div class="action-row">
+          <input id="set-amt" type="number" min="0" step="1" placeholder="amount" inputmode="numeric">
+          <button id="set-btn" class="btn-ghost" type="button">Set</button>
+        </div>
+        <label>Give supernova shards</label>
+        <div class="action-row">
+          <input id="shard-amt" type="number" min="1" step="1" placeholder="shards" inputmode="numeric">
+          <button id="shard-btn" class="btn-ghost" type="button">Give shards</button>
         </div>
         <label>Warn player</label>
         <div class="action-row">
           <input id="warn-msg" type="text" maxlength="300" placeholder="warning message">
           <button id="warn-btn" class="btn-warn" type="button">Warn</button>
         </div>
-        <button id="reset-btn" class="btn-danger" type="button">Reset to 0</button>
+        <button id="reset-btn" class="btn-danger" type="button">Full reset (wipes everything)</button>
       </div>`;
     const uname = p.username;
 
@@ -127,12 +140,36 @@
     });
 
     $('reset-btn').addEventListener('click', async () => {
-      if (!confirm(`Reset ${uname} to 0 points? This cannot be undone.`)) return;
+      if (!confirm(`Full reset ${uname}? Wipes stars, upgrades, shards, achievements. Cannot be undone.`)) return;
       try {
         await admin('/api/admin/reset', {
           method: 'POST', body: JSON.stringify({ username: uname }),
         });
-        alert(`${uname} reset to 0.`);
+        alert(`${uname} fully reset.`);
+        findPlayer();
+      } catch (e) { alert(e.message); }
+    });
+
+    $('set-btn').addEventListener('click', async () => {
+      const amt = parseInt($('set-amt').value, 10);
+      if (amt == null || amt < 0 || !Number.isInteger(amt)) { alert('Enter a non-negative whole number.'); return; }
+      try {
+        const r = await admin('/api/admin/set-stars', {
+          method: 'POST', body: JSON.stringify({ username: uname, amount: amt }),
+        });
+        alert(`Set ${uname} to ${fmt(r.points)} stars.`);
+        findPlayer();
+      } catch (e) { alert(e.message); }
+    });
+
+    $('shard-btn').addEventListener('click', async () => {
+      const amt = parseInt($('shard-amt').value, 10);
+      if (!amt || amt <= 0) { alert('Enter a positive number of shards.'); return; }
+      try {
+        const r = await admin('/api/admin/shards', {
+          method: 'POST', body: JSON.stringify({ username: uname, amount: amt }),
+        });
+        alert(`Gave ${fmt(amt)} shards to ${uname}. Total: ${fmt(r.shards)}`);
         findPlayer();
       } catch (e) { alert(e.message); }
     });

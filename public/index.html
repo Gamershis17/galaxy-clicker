@@ -37,54 +37,122 @@
       <button id="play-btn" type="button">Play</button>
     </div>
     <p id="gate-error" class="error hidden"></p>
-    <div class="divider"><span>or</span></div>
-    <!-- Google sign-in hook: wire up Google Identity Services here later -->
-    <button id="google-btn" class="google-btn" type="button">
-      <span class="g-logo">G</span> Continue with Google <em>(soon)</em>
-    </button>
   </section>
 
   <!-- Game -->
   <section id="game" class="hidden">
-    <div class="score-card compact">
-      <div class="points" id="points">0</div>
-      <div class="points-label">points</div>
-      <div class="rank-line muted" id="rank-line"></div>
+    <!-- Stats dashboard: 2x2 grid -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-label">STARS</div>
+        <div class="stat-value cyan" id="stat-stars">0</div>
+        <div class="stat-sub" id="stat-stars-sub">0 earned all time</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">PER CLICK</div>
+        <div class="stat-value" id="stat-perclick">1</div>
+        <div class="stat-sub">tap power</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">PER SECOND</div>
+        <div class="stat-value" id="stat-persec">0</div>
+        <div class="stat-sub">auto collectors</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">TOTAL CLICKS</div>
+        <div class="stat-value" id="stat-clicks">0</div>
+        <div class="stat-sub" id="stat-clicks-sub">0 supernova shards · 0 supernovas</div>
+      </div>
     </div>
 
-    <button id="clicker" type="button" aria-label="Click to earn points">
-      <span class="planet">🪐</span>
-    </button>
-    <div id="click-hint" class="muted">Tap the planet!</div>
-
-    <div class="hero-tracker">
-      <div class="hero-points" id="hero-points">0</div>
-      <div class="points-label">points</div>
-      <div class="rates" id="rates"></div>
+    <!-- Rank + multiplier -->
+    <div class="rank-row">
+      <span class="pill-cyan" id="rank-pill">Rank: Stargazer</span>
+      <span class="pill-gold" id="mult-pill">Multiplier ×1.00</span>
+    </div>
+    <div class="rank-progress-row">
+      <div class="progress-track"><div class="progress-fill" id="rank-progress"></div></div>
+      <span class="pill-dim" id="next-rank-pill">Next: Nebula Walker at 1K</span>
     </div>
 
-    <section class="card upgrades">
-      <h2>⚡ Upgrades</h2>
-      <div class="upg-grid">
-        <div class="upg">
-          <div class="upg-title">👆 Click Power <span id="upg-click-lvl" class="pill"></span></div>
-          <div class="upg-desc muted" id="upg-click-desc"></div>
-          <button id="buy-click" class="buy-btn" type="button"></button>
+    <!-- Galaxy Core tap area -->
+    <section class="card core-card">
+      <div class="core-head">
+        <div>
+          <h2 class="core-title">THE GALAXY CORE</h2>
+          <p class="muted core-sub">Tap the core — every click bursts stardust.</p>
         </div>
-        <div class="upg">
-          <div class="upg-title">🤖 Auto-Clicker <span id="upg-auto-lvl" class="pill"></span></div>
-          <div class="upg-desc muted" id="upg-auto-desc"></div>
-          <button id="buy-auto" class="buy-btn" type="button"></button>
+        <button id="sound-toggle" class="pill-btn" type="button" aria-pressed="true">Sound: On</button>
+      </div>
+      <button id="core" type="button" aria-label="Tap the galaxy core">
+        <span class="core-ring"></span>
+        <span class="core-label">TAP</span>
+      </button>
+      <div id="combo-line" class="combo-line hidden"></div>
+    </section>
+
+    <!-- Crit info + burst + admin -->
+    <p class="muted crit-info">Critical clicks (7%) pay ×5. Fast tapping builds a combo up to ×2.</p>
+    <div class="action-row-2">
+      <button id="burst-btn" class="btn-cyan" type="button" disabled>Stardust Burst (50 clicks)</button>
+      <a href="/admin.html" class="btn-dark-link" id="admin-link">Admin Panel</a>
+    </div>
+
+    <!-- Supernova prestige -->
+    <section class="card supernova-card">
+      <h2 class="supernova-title">SUPERNOVA — RESET FOR POWER</h2>
+      <p class="muted" id="supernova-desc">Earn 100K total stars to go supernova. Progress: 0 / 100K. Shards give +10% each, forever (until full reset).</p>
+      <button id="supernova-btn" class="btn-gold" type="button" disabled>Go Supernova — need 100K earned</button>
+    </section>
+
+    <!-- Achievements -->
+    <section class="card">
+      <h2>ACHIEVEMENTS</h2>
+      <p class="muted">Milestones light up as you play.</p>
+      <div class="ach-grid" id="ach-grid"></div>
+    </section>
+
+    <!-- Upgrades -->
+    <section class="card">
+      <div class="upg-head">
+        <div>
+          <h2>UPGRADES</h2>
+          <p class="muted">Costs rise 15% per level owned.</p>
         </div>
-        <div class="upg">
-          <div class="upg-title">✨ Multiplier <span id="upg-mult-lvl" class="pill"></span></div>
-          <div class="upg-desc muted" id="upg-mult-desc"></div>
-          <button id="buy-mult" class="buy-btn" type="button"></button>
+        <div class="buy-mode" role="group" aria-label="Buy amount">
+          <button class="mode-btn active" data-mode="1" type="button">×1</button>
+          <button class="mode-btn" data-mode="10" type="button">×10</button>
+          <button class="mode-btn" data-mode="max" type="button">MAX</button>
         </div>
       </div>
+      <div id="upg-list" class="upg-list"></div>
       <p id="upg-error" class="error hidden"></p>
     </section>
 
+    <!-- Admin commands (Cody only — key-gated page) -->
+    <section class="card admin-cmd-card">
+      <div class="admin-cmd-head">
+        <div>
+          <h2>ADMIN COMMANDS</h2>
+          <p class="muted">Give stars, set totals, reset — key protected, just for you.</p>
+        </div>
+        <a href="/admin.html" class="btn-pink">Open Admin</a>
+      </div>
+      <p class="muted cmd-help">Commands: <b>help</b> · <b>give &lt;amount&gt;</b> · <b>set stars &lt;amount&gt;</b> · <b>reset stars</b> · <b>reset all</b> · <b>max</b> · <b>shards &lt;n&gt;</b> — amounts accept k / m / b (e.g. 500k, 2.5m).</p>
+      <div class="row">
+        <input id="cmd-input" type="text" placeholder='Try "help" — needs admin key' autocomplete="off"
+               autocapitalize="off" spellcheck="false">
+        <button id="cmd-run" type="button">Run</button>
+      </div>
+      <div id="cmd-key-row" class="row hidden">
+        <input id="cmd-key" type="text" placeholder="paste admin key once" autocomplete="off"
+               autocapitalize="off" spellcheck="false">
+        <button id="cmd-key-save" type="button">Save key</button>
+      </div>
+      <div id="cmd-out" class="cmd-out hidden"></div>
+    </section>
+
+    <!-- Leaderboard -->
     <section class="card leaderboard">
       <h2>🏆 Top Clickers</h2>
       <ol id="leaderboard"></ol>

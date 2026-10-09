@@ -1,64 +1,82 @@
-/* Galaxy Clicker — frontend */
+/* 🌌 Galaxy Clicker — polished rebuild frontend */
 (function () {
   'use strict';
 
   const $ = (id) => document.getElementById(id);
   const gate = $('gate'), game = $('game');
   const usernameInput = $('username-input'), playBtn = $('play-btn'), gateError = $('gate-error');
-  const clicker = $('clicker'), pointsEl = $('points'), rankLine = $('rank-line');
-  const heroPoints = $('hero-points');
-  const board = $('leaderboard'), warnBanner = $('warn-banner');
   const userChip = $('user-chip'), userChipName = $('user-chip-name');
+  const warnBanner = $('warn-banner'), board = $('leaderboard');
 
   let username = localStorage.getItem('gc_username') || null;
-  let points = 0;
-  let clicking = false;
-  let perClick = 1, perSecond = 0;
 
-  // ---------- big animated points tracker ----------
-  // Top score-card updates instantly; the hero number tweens toward it.
-  let displayedPoints = 0, tweenRaf = null;
-  function setPoints(v) {
-    v = Math.max(0, Math.floor(v) || 0);
-    pointsEl.textContent = fmt(v);
-    if (reducedMotion) {
-      displayedPoints = v;
-      heroPoints.textContent = fmt(v);
-      return;
-    }
-    if (tweenRaf) cancelAnimationFrame(tweenRaf);
-    const from = displayedPoints, start = performance.now();
-    const dur = Math.min(450, 140 + Math.abs(v - from) * 1.5);
-    function step(t) {
-      const k = Math.min(1, (t - start) / Math.max(1, dur));
-      const e = 1 - Math.pow(1 - k, 3);
-      displayedPoints = Math.round(from + (v - from) * e);
-      heroPoints.textContent = fmt(displayedPoints);
-      if (k < 1) tweenRaf = requestAnimationFrame(step);
-      else tweenRaf = null;
-    }
-    tweenRaf = requestAnimationFrame(step);
-    // little pop on increase
-    if (v > from) {
-      heroPoints.classList.remove('pop');
-      void heroPoints.offsetWidth;
-      heroPoints.classList.add('pop');
-    }
+  // ---------- state ----------
+  let S = null; // full player snapshot from server
+  let buyMode = 1; // 1 | 10 | 'max'
+
+  // session-only mechanics (never sent as truth — server validates)
+  let combo = 1, comboTimer = null, lastTapAt = 0, tapStreak = 0;
+  let burstUntil = 0; // timestamp when stardust burst 2x expires
+  let burstClicksBanked = 0; // clicks counted toward next burst unlock
+  let soundOn = localStorage.getItem('gc_sound') !== '0';
+
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // ---------- helpers ----------
+  async function api(path, opts) {
+    const res = await fetch(path, Object.assign(
+      { headers: { 'Content-Type': 'application/json' } }, opts || {}));
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+    return data;
+  }
+  function fmt(n) {
+    n = Math.floor(Number(n) || 0);
+    if (n >= 1e9) return (n / 1e9).toFixed(2).replace(/\.?0+$/, '') + 'B';
+    if (n >= 1e6) return (n / 1e6).toFixed(2).replace(/\.?0+$/, '') + 'M';
+    if (n >= 1e3) return (n / 1e3).toFixed(1).replace(/\.?0+$/, '') + 'K';
+    return n.toLocaleString('en-US');
+  }
+  function fmtFull(n) { return Math.floor(Number(n) || 0).toLocaleString('en-US'); }
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[c]));
   }
 
-  // ---------- animated galaxy background ----------
-  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const bg = $('bg'), galaxyEl = $('galaxy'), dustBox = $('dust');
+  // ---------- sound (tiny Web Audio blips, no assets) ----------
+  let audioCtx = null;
+  function blip(freq, dur, type) {
+    if (!soundOn || reducedMotion) return;
+    try {
+      audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+      const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) { /* audio unavailable */ }
+  }
+  const sndTap = () => blip(520 + Math.random() * 120, 0.08);
+  const sndCrit = () => { blip(880, 0.12, 'square'); setTimeout(() => blip(1320, 0.15, 'square'), 60); };
+  const sndBuy = () => blip(660, 0.1, 'triangle');
+  const sndAch = () => { blip(784, 0.12, 'triangle'); setTimeout(() => blip(1046, 0.18, 'triangle'), 90); };
 
-  // ---------- performance mode ----------
-  // Full visuals by default; auto-drops to performance mode on low-memory or
-  // low-core mobile devices. The user can toggle anytime from the footer.
+  function applySoundLabel() {
+    const b = $('sound-toggle');
+    b.textContent = 'Sound: ' + (soundOn ? 'On' : 'Off');
+    b.setAttribute('aria-pressed', soundOn ? 'true' : 'false');
+  }
+
+  // ---------- background (kept from perf build) ----------
+  const bg = $('bg'), galaxyEl = $('galaxy'), dustBox = $('dust');
   function detectLowPower() {
     try {
       if (typeof navigator.deviceMemory === 'number' && navigator.deviceMemory < 4) return true;
       const mobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent || '');
       if (mobile && typeof navigator.hardwareConcurrency === 'number' && navigator.hardwareConcurrency <= 4) return true;
-    } catch (e) { /* ignore */ }
+    } catch (e) {}
     return false;
   }
   const perfPref = localStorage.getItem('gc_perf_mode');
@@ -73,22 +91,18 @@
   }
   applyPerfClass();
 
-  // spiral galaxy texture: rendered once, rotated by cheap GPU CSS animation
   (function buildGalaxy() {
     try {
-      const S = 512, c = document.createElement('canvas'); // was 640 — smaller is plenty for a bg
-      c.width = c.height = S;
+      const Ssize = 512, c = document.createElement('canvas');
+      c.width = c.height = Ssize;
       const g = c.getContext('2d');
-      const cx = S / 2, cy = S / 2;
-      // bright core
+      const cx = Ssize / 2, cy = Ssize / 2;
       let rg = g.createRadialGradient(cx, cy, 0, cx, cy, 140);
       rg.addColorStop(0, 'rgba(255,244,220,0.95)');
       rg.addColorStop(0.25, 'rgba(255,214,150,0.55)');
       rg.addColorStop(0.6, 'rgba(150,110,255,0.16)');
       rg.addColorStop(1, 'rgba(150,110,255,0)');
-      g.fillStyle = rg;
-      g.fillRect(0, 0, S, S);
-      // three spiral arms, tilted for a dynamic angle (220/arm, was 650 — ~1/3 the cost)
+      g.fillStyle = rg; g.fillRect(0, 0, Ssize, Ssize);
       const arms = 3, per = 220;
       for (let a = 0; a < arms; a++) {
         for (let i = 0; i < per; i++) {
@@ -109,62 +123,46 @@
         }
       }
       galaxyEl.style.backgroundImage = 'url(' + c.toDataURL() + ')';
-    } catch (e) { /* canvas unavailable — nebulae carry the background */ }
+    } catch (e) {}
   })();
 
-  // ---------- animated starfield (multi-color twinkle) ----------
   const canvas = $('stars'), ctx = canvas.getContext('2d');
   const STAR_COLORS = ['#dfe6ff', '#dfe6ff', '#ffffff', '#bfe3ff', '#ffe9b8', '#ffd6f5'];
   let stars = [];
   function sizeCanvas() {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-    // perf mode: even fewer stars; normal mode: 140 cap (was 220)
+    canvas.width = window.innerWidth; canvas.height = window.innerHeight;
     const area = window.innerWidth * window.innerHeight;
-    const count = perfMode
-      ? Math.min(90, Math.floor(area / 12000))
-      : Math.min(140, Math.floor(area / 9000));
+    const count = perfMode ? Math.min(90, Math.floor(area / 12000)) : Math.min(140, Math.floor(area / 9000));
     stars = Array.from({ length: count }, () => ({
-      x: Math.random() * canvas.width,
-      y: Math.random() * canvas.height,
-      r: Math.random() * 1.6 + 0.3,
-      tw: Math.random() * Math.PI * 2,
-      sp: 0.5 + Math.random() * 1.5,
-      c: STAR_COLORS[(Math.random() * STAR_COLORS.length) | 0],
+      x: Math.random() * canvas.width, y: Math.random() * canvas.height,
+      r: Math.random() * 1.6 + 0.3, tw: Math.random() * Math.PI * 2,
+      sp: 0.5 + Math.random() * 1.5, c: STAR_COLORS[(Math.random() * STAR_COLORS.length) | 0],
     }));
   }
   sizeCanvas();
   window.addEventListener('resize', () => {
     sizeCanvas();
-    // static modes have no rAF loop, so repaint once after resize
     if (reducedMotion || perfMode) requestAnimationFrame(drawStars);
   });
   function drawStars(t) {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     for (const s of stars) {
-      // perf mode / reduced motion: static, no per-frame twinkle loop
       const a = (reducedMotion || perfMode) ? 0.8 : 0.35 + 0.65 * Math.abs(Math.sin(t / 900 * s.sp + s.tw));
-      ctx.globalAlpha = a;
-      ctx.fillStyle = s.c;
-      ctx.beginPath();
-      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.globalAlpha = a; ctx.fillStyle = s.c;
+      ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.fill();
     }
     ctx.globalAlpha = 1;
     if (!reducedMotion && !perfMode) requestAnimationFrame(drawStars);
   }
   requestAnimationFrame(drawStars);
 
-  // drifting dust motes (cheap CSS particles) — skipped entirely in perf mode
   if (!reducedMotion && !perfMode && dustBox) {
     for (let i = 0; i < 6; i++) {
       const d = document.createElement('div');
       d.className = 'mote';
       const sz = 2 + Math.random() * 4;
-      d.style.width = sz + 'px';
-      d.style.height = sz + 'px';
-      d.style.left = (Math.random() * 100) + '%';
-      d.style.top = (Math.random() * 100) + '%';
+      d.style.width = sz + 'px'; d.style.height = sz + 'px';
+      d.style.left = (Math.random() * 100) + '%'; d.style.top = (Math.random() * 100) + '%';
       d.style.animationDuration = (18 + Math.random() * 22).toFixed(1) + 's';
       d.style.animationDelay = (-Math.random() * 30).toFixed(1) + 's';
       d.style.setProperty('--dx', ((Math.random() - 0.5) * 130).toFixed(0) + 'px');
@@ -172,74 +170,74 @@
       dustBox.appendChild(d);
     }
   }
-
-  // shooting stars — skipped entirely in perf mode; calmer cadence otherwise
   if (!reducedMotion && !perfMode) {
-    const TRAILS = [
-      'linear-gradient(90deg,#fff,rgba(160,220,255,0))',
-      'linear-gradient(90deg,#fff,rgba(255,210,130,0))',
-      'linear-gradient(90deg,#fff,rgba(200,170,255,0))',
-    ];
     setInterval(() => {
       if (document.hidden || Math.random() < 0.3) return;
-      const x0 = Math.random() * canvas.width * 0.7;
-      const y0 = Math.random() * canvas.height * 0.35;
-      const w = 100 + Math.random() * 60; // shorter trails than before (was 150–260)
       const el = document.createElement('div');
       el.className = 'shooting-star';
-      el.style.cssText = 'position:fixed;z-index:1;left:' + x0 + 'px;top:' + y0 + 'px;width:' + w + 'px;height:2px;' +
-        'background:' + TRAILS[(Math.random() * TRAILS.length) | 0] + ';transform:rotate(-25deg);' +
-        'box-shadow:0 0 10px rgba(255,255,255,0.9);' +
-        'animation:shoot 0.55s ease-out forwards;pointer-events:none;';
+      el.style.cssText = 'position:fixed;z-index:1;left:' + (Math.random() * canvas.width * 0.7) + 'px;' +
+        'top:' + (Math.random() * canvas.height * 0.35) + 'px;width:' + (100 + Math.random() * 60) + 'px;height:2px;' +
+        'background:linear-gradient(90deg,#fff,rgba(160,220,255,0));transform:rotate(-25deg);' +
+        'box-shadow:0 0 10px rgba(255,255,255,0.9);animation:shoot 0.55s ease-out forwards;pointer-events:none;';
       document.body.appendChild(el);
       setTimeout(() => el.remove(), 600);
-    }, 4000); // was 2800ms
+    }, 4000);
+    const st = document.createElement('style');
+    st.textContent = '@keyframes shoot{from{opacity:1;transform:rotate(-25deg) translateX(0)}to{opacity:0;transform:rotate(-25deg) translateX(-220px)}}';
+    document.head.appendChild(st);
   }
-  const style = document.createElement('style');
-  style.textContent = '@keyframes shoot{from{opacity:1;transform:rotate(-25deg) translateX(0)}to{opacity:0;transform:rotate(-25deg) translateX(-220px)}}';
-  document.head.appendChild(style);
-
-  // gentle parallax on mouse / device tilt (GPU transform on one wrapper).
-  // Runs only while settling — no permanent rAF loop — and is off in perf mode.
   if (!reducedMotion && !perfMode && bg) {
-    let tx = 0, ty = 0, cx = 0, cy = 0, parallaxRunning = false;
-    function parallaxTick() {
-      cx += (tx - cx) * 0.06;
-      cy += (ty - cy) * 0.06;
+    let tx = 0, ty = 0, cx = 0, cy = 0, running = false;
+    function tick() {
+      cx += (tx - cx) * 0.06; cy += (ty - cy) * 0.06;
       bg.style.transform = 'translate3d(' + (cx * 20).toFixed(1) + 'px,' + (cy * 20).toFixed(1) + 'px,0)';
-      if (Math.abs(tx - cx) > 0.0008 || Math.abs(ty - cy) > 0.0008) {
-        requestAnimationFrame(parallaxTick);
-      } else {
-        parallaxRunning = false;
-      }
+      if (Math.abs(tx - cx) > 0.0008 || Math.abs(ty - cy) > 0.0008) requestAnimationFrame(tick);
+      else running = false;
     }
-    function kickParallax() {
-      if (parallaxRunning) return;
-      parallaxRunning = true;
-      requestAnimationFrame(parallaxTick);
-    }
+    function kick() { if (!running) { running = true; requestAnimationFrame(tick); } }
     window.addEventListener('pointermove', (e) => {
-      tx = e.clientX / window.innerWidth - 0.5;
-      ty = e.clientY / window.innerHeight - 0.5;
-      kickParallax();
-    }, { passive: true });
-    window.addEventListener('deviceorientation', (e) => {
-      if (e.gamma == null || e.beta == null) return;
-      tx = Math.max(-1, Math.min(1, e.gamma / 28));
-      ty = Math.max(-1, Math.min(1, (e.beta - 45) / 28));
-      kickParallax();
+      tx = e.clientX / window.innerWidth - 0.5; ty = e.clientY / window.innerHeight - 0.5; kick();
     }, { passive: true });
   }
 
-  // ---------- helpers ----------
-  async function api(path, opts) {
-    const res = await fetch(path, Object.assign(
-      { headers: { 'Content-Type': 'application/json' } }, opts || {}));
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
-    return data;
+  // ---------- username gate ----------
+  async function enterAs(name) {
+    gateError.classList.add('hidden');
+    try {
+      await api('/api/register', { method: 'POST', body: JSON.stringify({ username: name }) });
+      username = name;
+      localStorage.setItem('gc_username', username);
+      showGame();
+    } catch (e) {
+      if (e.message.includes('taken') && localStorage.getItem('gc_username') === name) {
+        username = name;
+        showGame();
+        return;
+      }
+      gateError.textContent = e.message;
+      gateError.classList.remove('hidden');
+    }
   }
-  function fmt(n) { return n.toLocaleString('en-US'); }
+  playBtn.addEventListener('click', () => {
+    const name = usernameInput.value.trim();
+    if (!name) { gateError.textContent = 'Type a username first.'; gateError.classList.remove('hidden'); return; }
+    enterAs(name);
+  });
+  usernameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') playBtn.click(); });
+  $('change-name').addEventListener('click', () => {
+    localStorage.removeItem('gc_username');
+    username = null; S = null;
+    game.classList.add('hidden'); userChip.classList.add('hidden');
+    gate.classList.remove('hidden');
+    usernameInput.value = ''; usernameInput.focus();
+  });
+
+  function showGame() {
+    gate.classList.add('hidden'); game.classList.remove('hidden');
+    userChip.classList.remove('hidden'); userChipName.textContent = username;
+    applySoundLabel();
+    refreshMe(); refreshBoard();
+  }
 
   function showWarnings(warnings) {
     if (!warnings || !warnings.length) return;
@@ -247,98 +245,157 @@
     warnBanner.classList.remove('hidden');
   }
 
-  // ---------- username gate ----------
-  async function enterAs(name) {
-    gateError.classList.add('hidden');
-    try {
-      const data = await api('/api/register', {
-        method: 'POST', body: JSON.stringify({ username: name }),
-      });
-      username = data.username;
-      points = data.points;
-      localStorage.setItem('gc_username', username);
-      showGame();
-    } catch (e) {
-      // 409 = taken: if it's OUR saved name, just load it
-      if (e.message.includes('taken') && localStorage.getItem('gc_username') === name) {
-        username = name;
-        showGame();
-        refreshMe();
-        return;
-      }
-      gateError.textContent = e.message;
-      gateError.classList.remove('hidden');
+  // ---------- render ----------
+  const ACH_DEFS = [
+    ['clicks_100', '100 clicks'], ['clicks_1000', '1,000 clicks'],
+    ['earned_10k', '10K earned'], ['earned_1m', '1M earned'],
+    ['upgrades_10', '10 upgrades'], ['upgrades_50', '50 upgrades'],
+    ['supernova_1', 'First supernova'], ['hold_100k', 'Hold 100K stars'],
+  ];
+
+  function renderAll() {
+    if (!S) return;
+    // stats
+    $('stat-stars').textContent = fmt(S.points);
+    $('stat-stars-sub').textContent = fmt(S.totalEarned) + ' earned all time';
+    // per-click shown includes active burst/combo for clarity
+    const burstActive = Date.now() < burstUntil;
+    const effClick = S.perClick * combo * (burstActive ? 2 : 1);
+    $('stat-perclick').textContent = fmt(effClick);
+    $('stat-persec').textContent = fmt(S.perSecond * (burstActive ? 2 : 1));
+    $('stat-clicks').textContent = fmt(S.clicks);
+    $('stat-clicks-sub').textContent = fmt(S.supernovaShards) + ' supernova shards · ' + fmt(S.supernovas) + ' supernovas';
+    // rank
+    $('rank-pill').textContent = 'Rank: ' + S.rank;
+    $('mult-pill').textContent = 'Multiplier ×' + S.multiplier.toFixed(2);
+    if (S.nextRank) {
+      const prog = Math.min(1, S.totalEarned / S.nextRank.at);
+      $('rank-progress').style.width = (prog * 100).toFixed(1) + '%';
+      $('next-rank-pill').textContent = 'Next: ' + S.nextRank.name + ' at ' + fmt(S.nextRank.at);
+    } else {
+      $('rank-progress').style.width = '100%';
+      $('next-rank-pill').textContent = 'Max rank achieved!';
+    }
+    // combo line
+    const cl = $('combo-line');
+    if (combo > 1 || burstActive) {
+      const parts = [];
+      if (combo > 1) parts.push('🔥 Combo ×' + combo.toFixed(2));
+      if (burstActive) parts.push('✨ Stardust ×2 (' + Math.ceil((burstUntil - Date.now()) / 1000) + 's)');
+      cl.textContent = parts.join(' · ');
+      cl.classList.remove('hidden');
+    } else cl.classList.add('hidden');
+    // burst button
+    const bb = $('burst-btn');
+    if (burstActive) {
+      bb.textContent = '✨ Burst active (' + Math.ceil((burstUntil - Date.now()) / 1000) + 's)';
+      bb.disabled = true;
+    } else {
+      bb.textContent = 'Stardust Burst (' + Math.max(0, 50 - burstClicksBanked) + ' clicks to go)';
+      bb.disabled = burstClicksBanked < 50;
+    }
+    // supernova
+    const THRESH = 100000;
+    $('supernova-desc').textContent =
+      'Earn 100K total stars to go supernova. Progress: ' + fmt(S.totalEarned) + ' / 100K. ' +
+      'Shards give +10% each, forever (until full reset). You have ' + S.supernovaShards + ' shards.';
+    const sb = $('supernova-btn');
+    if (S.totalEarned >= THRESH) {
+      const shards = Math.floor(S.totalEarned / THRESH);
+      sb.textContent = '🌟 Go Supernova — gain ' + shards + ' shard' + (shards > 1 ? 's' : '');
+      sb.disabled = false;
+    } else {
+      sb.textContent = 'Go Supernova — need 100K earned';
+      sb.disabled = true;
+    }
+    renderAchievements();
+    renderUpgrades();
+  }
+
+  function renderAchievements() {
+    const grid = $('ach-grid');
+    const have = new Set(S.achievements || []);
+    grid.innerHTML = '';
+    for (const [id, name] of ACH_DEFS) {
+      const d = document.createElement('span');
+      d.className = 'ach-pill' + (have.has(id) ? ' earned' : '');
+      d.textContent = (have.has(id) ? '✓ ' : '') + name;
+      grid.appendChild(d);
     }
   }
 
-  playBtn.addEventListener('click', () => {
-    const name = usernameInput.value.trim();
-    if (!name) { gateError.textContent = 'Type a username first.'; gateError.classList.remove('hidden'); return; }
-    enterAs(name);
-  });
-  usernameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') playBtn.click(); });
-
-  $('change-name').addEventListener('click', () => {
-    localStorage.removeItem('gc_username');
-    username = null;
-    game.classList.add('hidden');
-    userChip.classList.add('hidden');
-    gate.classList.remove('hidden');
-    usernameInput.value = '';
-    usernameInput.focus();
-  });
-
-  // Google sign-in hook — wire Google Identity Services here later.
-  $('google-btn').addEventListener('click', () => {
-    gateError.textContent = 'Google sign-in is coming soon. Pick a username to play now.';
-    gateError.classList.remove('hidden');
-  });
-
-  function showGame() {
-    gate.classList.add('hidden');
-    game.classList.remove('hidden');
-    userChip.classList.remove('hidden');
-    userChipName.textContent = username;
-    setPoints(points);
-    refreshBoard();
-    refreshMe();
+  function toastAchievements(ids) {
+    if (!ids || !ids.length) return;
+    sndAch();
+    const names = ids.map(id => (ACH_DEFS.find(a => a[0] === id) || [id, id])[1]);
+    // simple floating toast
+    const t = document.createElement('div');
+    t.className = 'float-plus';
+    t.style.cssText = 'left:50%;top:38%;transform:translateX(-50%);font-size:1.2rem;color:var(--cyan);';
+    t.textContent = '🏆 ' + names.join(', ');
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 2200);
   }
 
-  // ---------- clicking ----------
-  function floatPlus(x, y, amount) {
-    const el = document.createElement('div');
-    el.className = 'float-plus';
-    el.textContent = '+' + fmt(amount);
-    el.style.left = (x - 10 + (Math.random() * 30 - 15)) + 'px';
-    el.style.top = (y - 10) + 'px';
-    document.body.appendChild(el);
-    setTimeout(() => el.remove(), 850);
-  }
-
-  clicker.addEventListener('pointerdown', (e) => {
-    if (!username || clicking) return;
-    clicking = true;
-    api('/api/click', { method: 'POST', body: JSON.stringify({ username, clientScore: points }) })
-      .then((data) => {
-        points = data.points;
-        if (data.perClick) perClick = data.perClick;
-        setPoints(points);
-        floatPlus(e.clientX, e.clientY, data.perClick || 1);
-        showWarnings(data.warnings);
-      })
-      .catch((err) => {
-        if (err.message.includes('slow down')) {
-          $('click-hint').textContent = 'Whoa, easy! Catching up…';
-          setTimeout(() => { $('click-hint').textContent = 'Tap the planet!'; }, 1500);
-        } else if (err.message.includes('Register')) {
-          localStorage.removeItem('gc_username');
-          location.reload();
+  function renderUpgrades() {
+    const list = $('upg-list');
+    list.innerHTML = '';
+    for (const u of S.upgrades) {
+      const item = document.createElement('div');
+      item.className = 'upg-item';
+      // cost for current buy mode
+      let label, cost, canBuy;
+      if (buyMode === 'max') {
+        // estimate max affordable (client-side; server is authoritative)
+        let c = 0, spent = 0, lvl = u.level;
+        while (c < 1000) {
+          const cc = Math.round(cost1(u, lvl + c));
+          if (spent + cc > S.points) break;
+          spent += cc; c++;
         }
-      })
-      .finally(() => { clicking = false; });
-  });
+        label = c > 0 ? 'BUY ×' + c : 'BUY';
+        cost = spent; canBuy = c > 0;
+      } else {
+        let total = 0;
+        for (let i = 0; i < buyMode; i++) total += Math.round(cost1(u, u.level + i));
+        label = 'BUY ×' + buyMode;
+        cost = total; canBuy = S.points >= total;
+      }
+      const eachTxt = u.tapEach ? '+' + fmt(u.tapEach) + ' / tap each' : '+' + fmt(u.secEach) + ' / sec each';
+      const totalTxt = u.tapEach ? 'Total: +' + fmt(u.totalTap) + ' / tap' : 'Total: +' + fmt(u.totalSec) + ' / sec';
+      item.innerHTML =
+        '<div class="upg-icon">' + u.icon + '</div>' +
+        '<div class="upg-info"><div class="upg-name">' + esc(u.name) + '</div>' +
+        '<div class="upg-effect">' + esc(u.short) + '</div>' +
+        '<div class="upg-owned">Owned ' + u.level + ' · ' + eachTxt + ' · ' + totalTxt + '</div></div>' +
+        '<button class="upg-buy" type="button" ' + (canBuy ? '' : 'disabled') + '>' +
+        label + '<small>' + fmt(cost) + ' stars</small></button>';
+      if (canBuy) {
+        item.querySelector('.upg-buy').addEventListener('click', () => buyUpgrade(u.id));
+      }
+      list.appendChild(item);
+    }
+  }
+  // client-side single-level cost mirror (server is authoritative)
+  function cost1(u, level) {
+    const base = { stellar_gloves: 15, nebula_collector: 50, comet_miner: 300, quantum_fingers: 900, pulsar_engine: 1800, star_forge: 8500, supernova_core: 42000, void_tap: 120000, black_hole: 350000, galaxy_swarm: 2200000 }[u.id] || 15;
+    return Math.max(1, Math.round(base * Math.pow(1.15, level)));
+  }
 
-  // ---------- leaderboard + self ----------
+  // ---------- data ----------
+  async function refreshMe() {
+    if (!username) return;
+    try {
+      const p = await api('/api/player/' + encodeURIComponent(username));
+      const prevAch = new Set((S && S.achievements) || []);
+      S = p;
+      renderAll();
+      const fresh = (p.achievements || []).filter(a => !prevAch.has(a));
+      // don't toast on first load
+      if (prevAch.size > 0) toastAchievements(fresh);
+    } catch (e) { /* offline — try later */ }
+  }
+
   async function refreshBoard() {
     try {
       const data = await api('/api/leaderboard');
@@ -347,108 +404,274 @@
         const li = document.createElement('li');
         if (p.username === username) li.className = 'me';
         const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : (i + 1) + '.';
-        li.innerHTML = `<span>${medal} ${escapeHtml(p.username)}</span><span class="pts">${fmt(p.points)}</span>`;
+        li.innerHTML = '<span>' + medal + ' ' + esc(p.username) + '</span><span class="pts">' + fmt(p.points) + '</span>';
         board.appendChild(li);
       });
       if (!data.leaders.length) board.innerHTML = '<li class="muted">No clickers yet. Be the first!</li>';
-    } catch (e) { /* offline? try later */ }
+    } catch (e) {}
   }
 
-  async function refreshMe() {
-    if (!username) return;
-    try {
-      const p = await api('/api/player/' + encodeURIComponent(username));
-      points = p.points;
-      setPoints(points);
-      rankLine.textContent = p.rank ? `Rank #${p.rank} · ${fmt(p.clicks)} clicks` : '';
-      if (p.perClick) perClick = p.perClick;
-      if (typeof p.perSecond === 'number') perSecond = p.perSecond;
-      renderUpgrades(p);
-    } catch (e) { /* ignore */ }
+  // ---------- tapping ----------
+  const core = $('core');
+  let clicking = false;
+
+  function stardustBurst(x, y) {
+    if (reducedMotion || perfMode) return;
+    for (let i = 0; i < 12; i++) {
+      const el = document.createElement('div');
+      el.className = 'stardust';
+      const ang = Math.random() * Math.PI * 2;
+      const dist = 40 + Math.random() * 90;
+      el.style.left = x + 'px'; el.style.top = y + 'px';
+      el.style.setProperty('--bx', (Math.cos(ang) * dist).toFixed(0) + 'px');
+      el.style.setProperty('--by', (Math.sin(ang) * dist).toFixed(0) + 'px');
+      document.body.appendChild(el);
+      setTimeout(() => el.remove(), 750);
+    }
   }
+  function floatText(x, y, text, crit) {
+    const el = document.createElement('div');
+    el.className = 'float-plus' + (crit ? ' crit' : '');
+    el.textContent = text;
+    el.style.left = (x - 14 + (Math.random() * 28)) + 'px';
+    el.style.top = (y - 12) + 'px';
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 850);
+  }
+
+  function bumpCombo() {
+    const now = Date.now();
+    if (now - lastTapAt < 900) tapStreak++;
+    else tapStreak = 1;
+    lastTapAt = now;
+    // combo scales with streak: 1 + min(streak/25, 1) → up to x2
+    combo = 1 + Math.min(1, tapStreak / 25);
+    if (comboTimer) clearTimeout(comboTimer);
+    comboTimer = setTimeout(() => { combo = 1; tapStreak = 0; renderAll(); }, 2000);
+  }
+
+  core.addEventListener('pointerdown', (e) => {
+    if (!username || clicking || !S) return;
+    clicking = true;
+    bumpCombo();
+    const burstActive = Date.now() < burstUntil;
+    // client predicts combo; server validates bounds and rolls crit itself
+    const comboSend = Math.min(2, Math.max(1, combo * (burstActive ? 2 : 1)));
+    api('/api/click', {
+      method: 'POST',
+      body: JSON.stringify({ username, clientScore: S.points, comboMult: comboSend }),
+    }).then((data) => {
+      S.points = data.points; S.clicks = data.clicks;
+      if (data.perClick) { /* server-computed gain */ }
+      // update local snapshot cheaply (full refresh every few clicks)
+      S.totalEarned += data.perClick || 0;
+      burstClicksBanked++;
+      if (data.crit) { sndCrit(); floatText(e.clientX, e.clientY, 'CRIT ×5! +' + fmt(data.perClick), true); }
+      else { sndTap(); floatText(e.clientX, e.clientY, '+' + fmt(data.perClick), false); }
+      stardustBurst(e.clientX, e.clientY);
+      if (data.newAchievements && data.newAchievements.length) {
+        for (const a of data.newAchievements) if (!S.achievements.includes(a)) S.achievements.push(a);
+        toastAchievements(data.newAchievements);
+      }
+      showWarnings(data.warnings);
+      renderAll();
+    }).catch((err) => {
+      if (String(err.message).includes('slow down')) {
+        floatText(e.clientX, e.clientY, 'whoa…', false);
+      } else if (String(err.message).includes('Register')) {
+        localStorage.removeItem('gc_username');
+        location.reload();
+      }
+    }).finally(() => { clicking = false; });
+  });
+
+  // ---------- stardust burst ----------
+  $('burst-btn').addEventListener('click', () => {
+    if (burstClicksBanked < 50 || Date.now() < burstUntil) return;
+    burstClicksBanked = 0;
+    burstUntil = Date.now() + 10000;
+    sndBuy();
+    renderAll();
+    // tick the countdown display
+    const iv = setInterval(() => {
+      if (Date.now() >= burstUntil) { clearInterval(iv); }
+      renderAll();
+    }, 1000);
+  });
 
   // ---------- upgrades ----------
-  function renderUpgrades(p) {
-    const upgErr = $('upg-error');
-    upgErr.classList.add('hidden');
-    $('rates').innerHTML = `<b>+${fmt(p.perClick || 1)}</b> per click · <b>+${fmt(p.perSecond || 0)}</b>/sec`;
+  document.querySelectorAll('.mode-btn').forEach((b) => {
+    b.addEventListener('click', () => {
+      document.querySelectorAll('.mode-btn').forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+      const m = b.dataset.mode;
+      buyMode = m === 'max' ? 'max' : parseInt(m, 10);
+      renderUpgrades();
+    });
+  });
 
-    // Click Power
-    $('upg-click-lvl').textContent = 'Lv ' + p.clickPower;
-    $('upg-click-desc').textContent = `+${fmt(p.perClick)} per click → Lv ${p.clickPower + 1} = +${fmt((p.clickPower + 1) * p.multiplier)}`;
-    const clickBtn = $('buy-click');
-    const clickCost = p.costs.clickPower;
-    clickBtn.textContent = `Buy — ${fmt(clickCost)} pts`;
-    clickBtn.disabled = points < clickCost;
-
-    // Auto-Clicker
-    $('upg-auto-lvl').textContent = p.autoClickers + ' owned';
-    $('upg-auto-desc').textContent = `Earns ${fmt(p.perSecond)}/sec passively → next adds ${fmt(p.multiplier)}/sec`;
-    const autoBtn = $('buy-auto');
-    const autoCost = p.costs.autoClicker;
-    autoBtn.textContent = `Buy — ${fmt(autoCost)} pts`;
-    autoBtn.disabled = points < autoCost;
-
-    // Multiplier
-    $('upg-mult-lvl').textContent = 'x' + p.multiplier;
-    const multBtn = $('buy-mult');
-    if (p.costs.multiplier) {
-      const nm = p.costs.multiplier;
-      $('upg-mult-desc').textContent = `Boosts ALL earnings → x${nm.tier} multiplies clicks AND auto-clickers`;
-      multBtn.textContent = `Buy x${nm.tier} — ${fmt(nm.cost)} pts`;
-      multBtn.disabled = points < nm.cost;
-      multBtn.classList.remove('maxed');
-    } else {
-      $('upg-mult-desc').textContent = 'Maxed out! You earn 10x on everything.';
-      multBtn.textContent = 'MAX';
-      multBtn.disabled = true;
-      multBtn.classList.add('maxed');
-    }
-  }
-
-  async function buyUpgrade(path) {
-    const upgErr = $('upg-error');
-    upgErr.classList.add('hidden');
+  async function buyUpgrade(id) {
+    const errEl = $('upg-error');
+    errEl.classList.add('hidden');
     try {
-      const data = await api(path, { method: 'POST', body: JSON.stringify({ username }) });
-      points = data.points;
-      setPoints(points);
-      perClick = data.perClick;
-      perSecond = data.perSecond;
-      renderUpgrades(data);
+      const data = await api('/api/upgrade/buy', {
+        method: 'POST', body: JSON.stringify({ username, upgradeId: id, mode: buyMode }),
+      });
+      S = Object.assign(S, data);
+      delete S.ok; delete S.bought;
+      sndBuy();
+      toastAchievements(data.newAchievements);
+      renderAll();
     } catch (e) {
-      upgErr.textContent = e.message;
-      upgErr.classList.remove('hidden');
+      errEl.textContent = e.message;
+      errEl.classList.remove('hidden');
     }
   }
 
-  $('buy-click').addEventListener('click', () => buyUpgrade('/api/upgrade/click'));
-  $('buy-auto').addEventListener('click', () => buyUpgrade('/api/upgrade/auto'));
-  $('buy-mult').addEventListener('click', () => buyUpgrade('/api/upgrade/multiplier'));
+  // ---------- supernova ----------
+  $('supernova-btn').addEventListener('click', async () => {
+    if (!S || S.totalEarned < 100000) return;
+    const shards = Math.floor(S.totalEarned / 100000);
+    if (!confirm('Go supernova? You\'ll reset stars, clicks, and upgrades to 0 and gain ' + shards + ' shard' + (shards > 1 ? 's' : '') + ' (+10% each, forever).')) return;
+    try {
+      const data = await api('/api/supernova', { method: 'POST', body: JSON.stringify({ username }) });
+      S = Object.assign(S, data);
+      delete S.ok; delete S.shardsGained;
+      burstClicksBanked = 0; combo = 1; tapStreak = 0;
+      sndAch();
+      toastAchievements(data.newAchievements);
+      renderAll();
+    } catch (e) { alert(e.message); }
+  });
 
-  function escapeHtml(s) {
-    return String(s).replace(/[&<>"']/g, (c) => ({
-      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-    }[c]));
+  // ---------- sound toggle ----------
+  $('sound-toggle').addEventListener('click', () => {
+    soundOn = !soundOn;
+    localStorage.setItem('gc_sound', soundOn ? '1' : '0');
+    applySoundLabel();
+    if (soundOn) sndTap();
+  });
+
+  // ---------- admin text commands (key-gated) ----------
+  const cmdInput = $('cmd-input'), cmdOut = $('cmd-out');
+  const cmdKeyRow = $('cmd-key-row'), cmdKey = $('cmd-key');
+  let cmdKeyVal = localStorage.getItem('gc_admin_key') || '';
+  if (!cmdKeyVal) cmdKeyRow.classList.remove('hidden');
+
+  function cmdPrint(t) {
+    cmdOut.classList.remove('hidden');
+    cmdOut.textContent += t + '\n';
+    cmdOut.scrollTop = cmdOut.scrollHeight;
   }
+  function parseAmount(s) {
+    const m = /^([\d.]+)\s*([kmb])?$/i.exec((s || '').trim());
+    if (!m) return null;
+    let n = parseFloat(m[1]);
+    if (!isFinite(n) || n < 0) return null;
+    const suf = (m[2] || '').toLowerCase();
+    if (suf === 'k') n *= 1e3; else if (suf === 'm') n *= 1e6; else if (suf === 'b') n *= 1e9;
+    return Math.floor(n);
+  }
+  async function adminFetch(path, opts) {
+    const res = await fetch(path, Object.assign({
+      headers: { 'Content-Type': 'application/json', 'x-admin-key': cmdKeyVal },
+    }, opts || {}));
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 403) throw new Error('wrong admin key');
+    if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+    return data;
+  }
+  async function runCommand(raw) {
+    const parts = raw.trim().split(/\s+/);
+    const cmd = (parts[0] || '').toLowerCase();
+    const arg = parts.slice(1).join(' ');
+    cmdPrint('> ' + raw);
+    try {
+      if (!cmdKeyVal) { cmdPrint('Set your admin key first (field below).'); return; }
+      switch (cmd) {
+        case 'help':
+          cmdPrint('give <amt> · set stars <amt> · reset stars · reset all · max · shards <n>');
+          break;
+        case 'give': {
+          const amt = parseAmount(arg);
+          if (amt == null || amt <= 0) { cmdPrint('usage: give <amount>  (e.g. give 500k)'); break; }
+          const r = await adminFetch('/api/admin/give', { method: 'POST', body: JSON.stringify({ username, amount: amt }) });
+          cmdPrint('gave ' + fmtFull(amt) + ' → ' + fmtFull(r.points) + ' stars');
+          break;
+        }
+        case 'set': {
+          const m = /^stars\s+(.+)$/i.exec(arg);
+          const amt = m && parseAmount(m[1]);
+          if (amt == null) { cmdPrint('usage: set stars <amount>'); break; }
+          const r = await adminFetch('/api/admin/set-stars', { method: 'POST', body: JSON.stringify({ username, amount: amt }) });
+          cmdPrint('stars set to ' + fmtFull(r.points));
+          break;
+        }
+        case 'reset': {
+          if (/^stars$/i.test(arg)) {
+            await adminFetch('/api/admin/reset-stars', { method: 'POST', body: JSON.stringify({ username }) });
+            cmdPrint('stars reset to 0 (upgrades kept)');
+          } else if (/^all$/i.test(arg)) {
+            if (!confirm('Full reset? Wipes stars, upgrades, shards, achievements.')) { cmdPrint('cancelled'); break; }
+            await adminFetch('/api/admin/reset', { method: 'POST', body: JSON.stringify({ username }) });
+            cmdPrint('full reset done');
+          } else cmdPrint('usage: reset stars | reset all');
+          break;
+        }
+        case 'max': {
+          const r = await adminFetch('/api/admin/give', { method: 'POST', body: JSON.stringify({ username, amount: 1000000000000 }) });
+          cmdPrint('maxed → ' + fmtFull(r.points) + ' stars. go wild.');
+          break;
+        }
+        case 'shards': {
+          const n = parseInt(arg, 10);
+          if (!n || n <= 0) { cmdPrint('usage: shards <n>'); break; }
+          const r = await adminFetch('/api/admin/shards', { method: 'POST', body: JSON.stringify({ username, amount: n }) });
+          cmdPrint('shards → ' + r.shards + ' total');
+          break;
+        }
+        default:
+          cmdPrint('unknown command. try "help".');
+      }
+    } catch (e) {
+      cmdPrint('error: ' + e.message);
+      if (String(e.message).includes('admin key')) {
+        cmdKeyVal = '';
+        localStorage.removeItem('gc_admin_key');
+        cmdKeyRow.classList.remove('hidden');
+      }
+    }
+    refreshMe();
+  }
+  $('cmd-run').addEventListener('click', () => {
+    const v = cmdInput.value.trim();
+    if (v) { cmdInput.value = ''; runCommand(v); }
+  });
+  cmdInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') $('cmd-run').click(); });
+  $('cmd-key-save').addEventListener('click', () => {
+    const k = cmdKey.value.trim();
+    if (!k) return;
+    cmdKeyVal = k;
+    localStorage.setItem('gc_admin_key', k);
+    cmdKeyRow.classList.add('hidden');
+    cmdPrint('key saved.');
+  });
 
-  // ---------- performance toggle ----------
+  // ---------- perf toggle ----------
   const perfToggle = $('perf-toggle');
   if (perfToggle) {
     perfToggle.addEventListener('click', () => {
       perfMode = !perfMode;
       localStorage.setItem('gc_perf_mode', perfMode ? '1' : '0');
       applyPerfClass();
-      // reload so all background subsystems re-init cleanly in the new mode
       location.reload();
     });
   }
 
   // ---------- boot ----------
-  if (username) {
-    showGame();
-  } else {
-    usernameInput.focus();
-  }
-  setInterval(() => { if (username) refreshBoard(); }, 10000);
+  if (username) showGame();
+  else usernameInput.focus();
+  // passive income ticks server-side every second; refresh stats on a beat
+  setInterval(() => { if (username && S) refreshMe(); }, 5000);
+  setInterval(() => { if (username) refreshBoard(); }, 15000);
 })();
