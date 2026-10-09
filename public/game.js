@@ -50,10 +50,33 @@
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const bg = $('bg'), galaxyEl = $('galaxy'), dustBox = $('dust');
 
+  // ---------- performance mode ----------
+  // Full visuals by default; auto-drops to performance mode on low-memory or
+  // low-core mobile devices. The user can toggle anytime from the footer.
+  function detectLowPower() {
+    try {
+      if (typeof navigator.deviceMemory === 'number' && navigator.deviceMemory < 4) return true;
+      const mobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent || '');
+      if (mobile && typeof navigator.hardwareConcurrency === 'number' && navigator.hardwareConcurrency <= 4) return true;
+    } catch (e) { /* ignore */ }
+    return false;
+  }
+  const perfPref = localStorage.getItem('gc_perf_mode');
+  let perfMode = perfPref === null ? detectLowPower() : perfPref === '1';
+  function applyPerfClass() {
+    document.body.classList.toggle('perf', perfMode);
+    const t = $('perf-toggle');
+    if (t) {
+      t.textContent = perfMode ? '✨ Full visuals' : '⚡ Performance mode';
+      t.setAttribute('aria-pressed', perfMode ? 'true' : 'false');
+    }
+  }
+  applyPerfClass();
+
   // spiral galaxy texture: rendered once, rotated by cheap GPU CSS animation
   (function buildGalaxy() {
     try {
-      const S = 640, c = document.createElement('canvas');
+      const S = 512, c = document.createElement('canvas'); // was 640 — smaller is plenty for a bg
       c.width = c.height = S;
       const g = c.getContext('2d');
       const cx = S / 2, cy = S / 2;
@@ -65,8 +88,8 @@
       rg.addColorStop(1, 'rgba(150,110,255,0)');
       g.fillStyle = rg;
       g.fillRect(0, 0, S, S);
-      // three spiral arms, tilted for a dynamic angle
-      const arms = 3, per = 650;
+      // three spiral arms, tilted for a dynamic angle (220/arm, was 650 — ~1/3 the cost)
+      const arms = 3, per = 220;
       for (let a = 0; a < arms; a++) {
         for (let i = 0; i < per; i++) {
           const t = i / per;
@@ -96,7 +119,12 @@
   function sizeCanvas() {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
-    stars = Array.from({ length: Math.min(220, window.innerWidth * window.innerHeight / 6000) }, () => ({
+    // perf mode: even fewer stars; normal mode: 140 cap (was 220)
+    const area = window.innerWidth * window.innerHeight;
+    const count = perfMode
+      ? Math.min(90, Math.floor(area / 12000))
+      : Math.min(140, Math.floor(area / 9000));
+    stars = Array.from({ length: count }, () => ({
       x: Math.random() * canvas.width,
       y: Math.random() * canvas.height,
       r: Math.random() * 1.6 + 0.3,
@@ -106,11 +134,16 @@
     }));
   }
   sizeCanvas();
-  window.addEventListener('resize', sizeCanvas);
+  window.addEventListener('resize', () => {
+    sizeCanvas();
+    // static modes have no rAF loop, so repaint once after resize
+    if (reducedMotion || perfMode) requestAnimationFrame(drawStars);
+  });
   function drawStars(t) {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     for (const s of stars) {
-      const a = reducedMotion ? 0.8 : 0.35 + 0.65 * Math.abs(Math.sin(t / 900 * s.sp + s.tw));
+      // perf mode / reduced motion: static, no per-frame twinkle loop
+      const a = (reducedMotion || perfMode) ? 0.8 : 0.35 + 0.65 * Math.abs(Math.sin(t / 900 * s.sp + s.tw));
       ctx.globalAlpha = a;
       ctx.fillStyle = s.c;
       ctx.beginPath();
@@ -118,13 +151,13 @@
       ctx.fill();
     }
     ctx.globalAlpha = 1;
-    if (!reducedMotion) requestAnimationFrame(drawStars);
+    if (!reducedMotion && !perfMode) requestAnimationFrame(drawStars);
   }
   requestAnimationFrame(drawStars);
 
-  // drifting dust motes (cheap CSS particles)
-  if (!reducedMotion && dustBox) {
-    for (let i = 0; i < 14; i++) {
+  // drifting dust motes (cheap CSS particles) — skipped entirely in perf mode
+  if (!reducedMotion && !perfMode && dustBox) {
+    for (let i = 0; i < 6; i++) {
       const d = document.createElement('div');
       d.className = 'mote';
       const sz = 2 + Math.random() * 4;
@@ -140,8 +173,8 @@
     }
   }
 
-  // dramatic shooting stars — more frequent, colored trails
-  if (!reducedMotion) {
+  // shooting stars — skipped entirely in perf mode; calmer cadence otherwise
+  if (!reducedMotion && !perfMode) {
     const TRAILS = [
       'linear-gradient(90deg,#fff,rgba(160,220,255,0))',
       'linear-gradient(90deg,#fff,rgba(255,210,130,0))',
@@ -151,7 +184,7 @@
       if (document.hidden || Math.random() < 0.3) return;
       const x0 = Math.random() * canvas.width * 0.7;
       const y0 = Math.random() * canvas.height * 0.35;
-      const w = 150 + Math.random() * 110;
+      const w = 100 + Math.random() * 60; // shorter trails than before (was 150–260)
       const el = document.createElement('div');
       el.className = 'shooting-star';
       el.style.cssText = 'position:fixed;z-index:1;left:' + x0 + 'px;top:' + y0 + 'px;width:' + w + 'px;height:2px;' +
@@ -160,30 +193,42 @@
         'animation:shoot 0.55s ease-out forwards;pointer-events:none;';
       document.body.appendChild(el);
       setTimeout(() => el.remove(), 600);
-    }, 2800);
+    }, 4000); // was 2800ms
   }
   const style = document.createElement('style');
-  style.textContent = '@keyframes shoot{from{opacity:1;transform:rotate(-25deg) translateX(0)}to{opacity:0;transform:rotate(-25deg) translateX(-320px)}}';
+  style.textContent = '@keyframes shoot{from{opacity:1;transform:rotate(-25deg) translateX(0)}to{opacity:0;transform:rotate(-25deg) translateX(-220px)}}';
   document.head.appendChild(style);
 
-  // gentle parallax on mouse / device tilt (GPU transform on one wrapper)
-  if (!reducedMotion && bg) {
-    let tx = 0, ty = 0, cx = 0, cy = 0;
+  // gentle parallax on mouse / device tilt (GPU transform on one wrapper).
+  // Runs only while settling — no permanent rAF loop — and is off in perf mode.
+  if (!reducedMotion && !perfMode && bg) {
+    let tx = 0, ty = 0, cx = 0, cy = 0, parallaxRunning = false;
+    function parallaxTick() {
+      cx += (tx - cx) * 0.06;
+      cy += (ty - cy) * 0.06;
+      bg.style.transform = 'translate3d(' + (cx * 20).toFixed(1) + 'px,' + (cy * 20).toFixed(1) + 'px,0)';
+      if (Math.abs(tx - cx) > 0.0008 || Math.abs(ty - cy) > 0.0008) {
+        requestAnimationFrame(parallaxTick);
+      } else {
+        parallaxRunning = false;
+      }
+    }
+    function kickParallax() {
+      if (parallaxRunning) return;
+      parallaxRunning = true;
+      requestAnimationFrame(parallaxTick);
+    }
     window.addEventListener('pointermove', (e) => {
       tx = e.clientX / window.innerWidth - 0.5;
       ty = e.clientY / window.innerHeight - 0.5;
+      kickParallax();
     }, { passive: true });
     window.addEventListener('deviceorientation', (e) => {
       if (e.gamma == null || e.beta == null) return;
       tx = Math.max(-1, Math.min(1, e.gamma / 28));
       ty = Math.max(-1, Math.min(1, (e.beta - 45) / 28));
+      kickParallax();
     }, { passive: true });
-    (function parallax() {
-      cx += (tx - cx) * 0.05;
-      cy += (ty - cy) * 0.05;
-      bg.style.transform = 'translate3d(' + (cx * 20).toFixed(1) + 'px,' + (cy * 20).toFixed(1) + 'px,0)';
-      requestAnimationFrame(parallax);
-    })();
   }
 
   // ---------- helpers ----------
@@ -385,6 +430,18 @@
     return String(s).replace(/[&<>"']/g, (c) => ({
       '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
     }[c]));
+  }
+
+  // ---------- performance toggle ----------
+  const perfToggle = $('perf-toggle');
+  if (perfToggle) {
+    perfToggle.addEventListener('click', () => {
+      perfMode = !perfMode;
+      localStorage.setItem('gc_perf_mode', perfMode ? '1' : '0');
+      applyPerfClass();
+      // reload so all background subsystems re-init cleanly in the new mode
+      location.reload();
+    });
   }
 
   // ---------- boot ----------
