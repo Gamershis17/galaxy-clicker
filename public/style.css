@@ -30,23 +30,68 @@ body {
 }
 
 /* ---- animated background ---- */
-#stars {
+#bg {
   position: fixed;
+  inset: -28px; /* bleed so parallax edges never show */
+  z-index: 0;
+  pointer-events: none;
+  will-change: transform;
+}
+
+#galaxy {
+  position: absolute;
+  width: 135vmax;
+  height: 135vmax;
+  left: 50%;
+  top: 44%;
+  transform: translate(-50%, -50%);
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  opacity: 0.9;
+  animation: galaxySpin 170s linear infinite;
+  will-change: transform;
+}
+@keyframes galaxySpin {
+  from { transform: translate(-50%, -50%) rotate(0deg); }
+  to   { transform: translate(-50%, -50%) rotate(360deg); }
+}
+
+#stars {
+  position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
-  z-index: 0;
   pointer-events: none;
 }
 
+#dust {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.mote {
+  position: absolute;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(205, 195, 255, 0.9), transparent 70%);
+  opacity: 0.4;
+  animation: moteDrift 30s ease-in-out infinite alternate;
+}
+@keyframes moteDrift {
+  0%   { transform: translate(0, 0); opacity: 0.12; }
+  50%  { opacity: 0.55; }
+  100% { transform: translate(var(--dx, 40px), var(--dy, -40px)); opacity: 0.12; }
+}
+
 .nebula {
-  position: fixed;
+  position: absolute;
   border-radius: 50%;
   filter: blur(70px);
-  z-index: 0;
   pointer-events: none;
   opacity: 0.5;
-  animation: drift 36s ease-in-out infinite alternate;
+  animation: drift 36s ease-in-out infinite alternate, hueShift 46s linear infinite;
+  will-change: transform, filter;
 }
 .nebula-1 {
   width: 60vmax; height: 60vmax;
@@ -68,6 +113,10 @@ body {
 @keyframes drift {
   from { transform: translate(0, 0) scale(1); }
   to   { transform: translate(4vmax, 3vmax) scale(1.12); }
+}
+@keyframes hueShift {
+  from { filter: blur(70px) hue-rotate(0deg); }
+  to   { filter: blur(70px) hue-rotate(360deg); }
 }
 
 /* ---- layout ---- */
@@ -181,6 +230,9 @@ button:active { transform: scale(0.97); }
 
 /* ---- score ---- */
 .score-card { text-align: center; margin: 8px 0 4px; }
+.score-card.compact { margin: 2px 0; }
+.score-card.compact .points { font-size: 1.5rem; }
+.score-card.compact .points-label { font-size: 0.68rem; letter-spacing: 2px; }
 .points {
   font-size: 3.4rem;
   font-weight: 800;
@@ -191,6 +243,35 @@ button:active { transform: scale(0.97); }
 }
 .points-label { color: var(--muted); letter-spacing: 3px; text-transform: uppercase; font-size: 0.85rem; }
 .rank-line { margin-top: 6px; }
+
+/* ---- hero tracker: big animated points display below the clicker ---- */
+.hero-tracker {
+  text-align: center;
+  margin: 14px 0 8px;
+  padding: 20px 12px 16px;
+  background: rgba(10, 12, 30, 0.6);
+  border: 1px solid var(--card-border);
+  border-radius: 22px;
+  backdrop-filter: blur(6px);
+  box-shadow: inset 0 0 40px rgba(139, 123, 255, 0.08), 0 0 30px rgba(0, 0, 0, 0.35);
+}
+.hero-points {
+  font-size: clamp(3.2rem, 17vw, 5rem);
+  font-weight: 900;
+  line-height: 1;
+  color: var(--gold);
+  text-shadow: 0 0 36px rgba(255, 209, 102, 0.55), 0 2px 0 rgba(0, 0, 0, 0.45);
+  font-variant-numeric: tabular-nums;
+  word-break: break-all;
+}
+.hero-points.pop { animation: heroPop 0.22s ease; }
+@keyframes heroPop {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.05); }
+  100% { transform: scale(1); }
+}
+.hero-tracker .rates { margin-top: 10px; font-size: 1.02rem; color: var(--muted); }
+.hero-tracker .rates b { color: var(--gold); }
 
 /* ---- the clicker planet ---- */
 #clicker {
@@ -341,7 +422,10 @@ button:active { transform: scale(0.97); }
 
 @media (prefers-reduced-motion: reduce) {
   .nebula { animation: none; }
+  #galaxy { animation: none; }
+  .mote { animation: none; }
   .float-plus { animation-duration: 0.01s; }
+  .hero-points.pop { animation: none; }
 }
 
 @media (min-width: 700px) {
