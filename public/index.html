@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>🌌 Galaxy Clicker</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<canvas id="stars" aria-hidden="true"></canvas>
+<div class="nebula nebula-1" aria-hidden="true"></div>
+<div class="nebula nebula-2" aria-hidden="true"></div>
+<div class="nebula nebula-3" aria-hidden="true"></div>
+
+<div id="warn-banner" class="warn-banner hidden" role="alert"></div>
+
+<header class="topbar">
+  <h1>🌌 Galaxy Clicker</h1>
+  <div id="user-chip" class="user-chip hidden">
+    <span id="user-chip-name"></span>
+    <button id="change-name" class="link-btn" type="button">change</button>
+  </div>
+</header>
+
+<main class="game-wrap">
+  <!-- Username gate -->
+  <section id="gate" class="card">
+    <h2>Pick a username</h2>
+    <p class="muted">No account needed. Just a name on the leaderboard.</p>
+    <div class="row">
+      <input id="username-input" type="text" maxlength="24" placeholder="Your username"
+             autocomplete="off" autocapitalize="off" spellcheck="false">
+      <button id="play-btn" type="button">Play</button>
+    </div>
+    <p id="gate-error" class="error hidden"></p>
+    <div class="divider"><span>or</span></div>
+    <!-- Google sign-in hook: wire up Google Identity Services here later -->
+    <button id="google-btn" class="google-btn" type="button">
+      <span class="g-logo">G</span> Continue with Google <em>(soon)</em>
+    </button>
+  </section>
+
+  <!-- Game -->
+  <section id="game" class="hidden">
+    <div class="score-card">
+      <div class="points" id="points">0</div>
+      <div class="points-label">points</div>
+      <div class="rank-line muted" id="rank-line"></div>
+      <div class="rates muted" id="rates"></div>
+    </div>
+
+    <button id="clicker" type="button" aria-label="Click to earn points">
+      <span class="planet">🪐</span>
+    </button>
+    <div id="click-hint" class="muted">Tap the planet!</div>
+
+    <section class="card upgrades">
+      <h2>⚡ Upgrades</h2>
+      <div class="upg-grid">
+        <div class="upg">
+          <div class="upg-title">👆 Click Power <span id="upg-click-lvl" class="pill"></span></div>
+          <div class="upg-desc muted" id="upg-click-desc"></div>
+          <button id="buy-click" class="buy-btn" type="button"></button>
+        </div>
+        <div class="upg">
+          <div class="upg-title">🤖 Auto-Clicker <span id="upg-auto-lvl" class="pill"></span></div>
+          <div class="upg-desc muted" id="upg-auto-desc"></div>
+          <button id="buy-auto" class="buy-btn" type="button"></button>
+        </div>
+        <div class="upg">
+          <div class="upg-title">✨ Multiplier <span id="upg-mult-lvl" class="pill"></span></div>
+          <div class="upg-desc muted" id="upg-mult-desc"></div>
+          <button id="buy-mult" class="buy-btn" type="button"></button>
+        </div>
+      </div>
+      <p id="upg-error" class="error hidden"></p>
+    </section>
+
+    <section class="card leaderboard">
+      <h2>🏆 Top Clickers</h2>
+      <ol id="leaderboard"></ol>
+    </section>
+  </section>
+</main>
+
+<footer class="foot muted">
+  <span>Auto-clickers welcome. Score fakers get zeroed.</span>
+</footer>
+
+<script src="game.js"></script>
+</body>
+</html>

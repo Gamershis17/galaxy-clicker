@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>🛡️ Galaxy Clicker — Admin</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<canvas id="stars" aria-hidden="true"></canvas>
+<div class="nebula nebula-1" aria-hidden="true"></div>
+<div class="nebula nebula-2" aria-hidden="true"></div>
+
+<header class="topbar">
+  <h1>🛡️ Admin Panel</h1>
+  <a class="link-btn" href="/" style="font-size:1rem;">← game</a>
+</header>
+
+<main class="admin-wrap">
+  <!-- key gate -->
+  <section id="key-gate" class="card">
+    <h2>Admin key</h2>
+    <p class="muted">Find it in <code>data/admin-key.txt</code> on the server.</p>
+    <div class="row">
+      <input id="key-input" type="text" placeholder="paste admin key" autocomplete="off"
+             autocapitalize="off" spellcheck="false">
+      <button id="unlock-btn" type="button">Unlock</button>
+    </div>
+    <p id="key-error" class="error hidden"></p>
+  </section>
+
+  <div id="panel" class="hidden">
+    <!-- player search + actions -->
+    <section class="card">
+      <h2>🔍 Player</h2>
+      <div class="row">
+        <input id="search-input" type="text" maxlength="24" placeholder="username"
+               autocomplete="off" autocapitalize="off" spellcheck="false">
+        <button id="search-btn" type="button">Find</button>
+      </div>
+      <div id="player-card" class="player-card hidden"></div>
+    </section>
+
+    <!-- alerts -->
+    <section class="card">
+      <h2>⚠️ Cheat Alerts <span id="alert-count" class="muted"></span></h2>
+      <p class="muted">Suspicious activity, with usernames. You decide: warn or reset to 0.</p>
+      <div class="row">
+        <button id="refresh-alerts" class="btn-ghost" type="button" style="flex:1">↻ Refresh</button>
+        <button id="toggle-resolved" class="btn-ghost" type="button" style="flex:1">Show resolved</button>
+      </div>
+      <div id="alerts"></div>
+    </section>
+
+    <!-- audit log -->
+    <section class="card">
+      <h2>📝 Recent admin actions</h2>
+      <div id="admin-log" class="muted"></div>
+    </section>
+  </div>
+</main>
+
+<script src="admin.js"></script>
+<script>
+// tiny starfield shared with game page
+(function(){
+  const c=document.getElementById('stars'),x=c.getContext('2d');let s=[];
+  function r(){c.width=innerWidth;c.height=innerHeight;
+    s=Array.from({length:Math.min(160,innerWidth*innerHeight/8000)},()=>({x:Math.random()*c.width,y:Math.random()*c.height,r:Math.random()*1.5+.3,p:Math.random()*6.28}));}
+  r();addEventListener('resize',r);
+  (function d(t){x.clearRect(0,0,c.width,c.height);
+    for(const q of s){x.globalAlpha=.35+.6*Math.abs(Math.sin(t/900+q.p));x.fillStyle='#dfe6ff';x.beginPath();x.arc(q.x,q.y,q.r,0,7);x.fill();}
+    x.globalAlpha=1;requestAnimationFrame(d);})(0);
+})();
+</script>
+</body>
+</html>
