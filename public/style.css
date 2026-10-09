@@ -109,6 +109,15 @@ input[type="text"], input[type="number"] {
   background: rgba(8, 10, 24, 0.9); color: var(--text); min-width: 0;
 }
 input:focus { outline: 2px solid var(--cyan); }
+select {
+  flex: 1; min-height: var(--tap-min); font-size: 1.02rem;
+  padding: 10px 14px; border-radius: 12px;
+  border: 1px solid var(--card-border);
+  background: rgba(8, 10, 24, 0.9); color: var(--text); min-width: 0;
+}
+select:focus { outline: 2px solid var(--cyan); }
+.power-section { margin-top: 18px; padding-top: 14px; border-top: 1px dashed var(--card-border); }
+.power-section h3 { margin: 0 0 10px; font-size: 1.05rem; color: var(--gold); }
 button {
   min-height: var(--tap-min); font-size: 1rem; font-weight: 700;
   padding: 10px 22px; border: none; border-radius: 12px; cursor: pointer;
@@ -329,6 +338,7 @@ body.perf .nebula { animation: none; opacity: 0.32; }
 body.perf #dust { display: none; }
 body.perf #bg { will-change: auto; }
 body.perf #core .core-ring { animation: none; }
+body.perf #core-fab { animation: none; }
 
 /* ---- admin panel (key-gated, Cody only) ---- */
 .admin-wrap { max-width: 640px; margin: 0 auto; padding: 8px 14px 60px; position: relative; z-index: 2; }
@@ -360,7 +370,7 @@ body.perf #core .core-ring { animation: none; }
 .nav-link { display: inline-block; margin-top: 18px; color: var(--cyan); min-height: var(--tap-min); line-height: var(--tap-min); }
 
 @media (prefers-reduced-motion: reduce) {
-  .nebula, #galaxy, .mote, #core .core-ring { animation: none; }
+  .nebula, #galaxy, .mote, #core .core-ring, #core-fab { animation: none; }
   .float-plus, .stardust { animation-duration: 0.01s; }
   .tab-panel.active { animation: none; }
 }
@@ -381,6 +391,9 @@ body.perf #core .core-ring { animation: none; }
   padding: 8px 10px calc(10px + env(safe-area-inset-bottom));
   background: rgba(10, 14, 39, 0.97);
   border-top: 1px solid var(--card-border);
+  /* concave center notch for the core FAB (shows real bg through it) */
+  -webkit-mask: radial-gradient(circle 42px at 50% 0, transparent 42px, black 43px);
+  mask: radial-gradient(circle 42px at 50% 0, transparent 42px, black 43px);
 }
 .tab-btn {
   flex: 1; min-height: 58px; background: none; box-shadow: none;
@@ -394,6 +407,39 @@ body.perf #core .core-ring { animation: none; }
   text-shadow: 0 0 14px rgba(0, 212, 255, 0.6);
 }
 .tab-btn:active { transform: scale(0.96); }
+/* middle tab makes room for the FAB notch */
+#tabbtn-upgrades { padding-top: 30px; }
+
+/* ---- center core FAB (raised, tappable from any tab) ---- */
+#core-fab {
+  position: fixed;
+  left: 50%;
+  bottom: calc(40px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  width: 72px; height: 72px;
+  border-radius: 50%;
+  z-index: 21;
+  padding: 0; min-height: 0;
+  background:
+    radial-gradient(circle at 32% 28%, rgba(0, 212, 255, 0.6), transparent 42%),
+    radial-gradient(circle at 68% 62%, rgba(255, 110, 199, 0.55), transparent 44%),
+    radial-gradient(circle at 50% 50%, #232a5e, #0d1030 72%);
+  border: 3px solid rgba(0, 212, 255, 0.65);
+  box-shadow: 0 0 28px rgba(0, 212, 255, 0.55), inset 0 0 20px rgba(0, 0, 0, 0.5);
+  animation: fabPulse 2.6s ease-in-out infinite;
+  user-select: none; -webkit-user-select: none;
+  touch-action: manipulation;
+}
+#core-fab .fab-label {
+  font-weight: 900; font-size: 0.95rem; letter-spacing: 2px;
+  color: #fff; text-shadow: 0 0 10px rgba(0, 212, 255, 0.9);
+  pointer-events: none;
+}
+#core-fab:active { transform: translateX(-50%) scale(0.9); animation: none; }
+@keyframes fabPulse {
+  0%, 100% { transform: translateX(-50%) scale(1); }
+  50% { transform: translateX(-50%) scale(1.07); }
+}
 
 /* ---- admin key modal ---- */
 .modal {

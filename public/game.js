@@ -18,6 +18,11 @@
   let combo = 1, comboTimer = null, lastTapAt = 0, tapStreak = 0;
   let burstUntil = 0; // timestamp when stardust burst 2x expires
   let burstClicksBanked = 0; // clicks counted toward next burst unlock
+  // admin-granted burst charges: 1 charge = 50 banked clicks = 1 free burst.
+  // tracked per-username in localStorage so charges are converted exactly once.
+  function burstSeenKey() { return 'gc_burst_seen_' + username; }
+  function getBurstSeen() { return parseInt(localStorage.getItem(burstSeenKey()) || '0', 10) || 0; }
+  function setBurstSeen(n) { try { localStorage.setItem(burstSeenKey(), String(n)); } catch (e) {} }
   let soundOn = localStorage.getItem('gc_sound') !== '0';
 
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -390,6 +395,12 @@
       const p = await api('/api/player/' + encodeURIComponent(username));
       const prevAch = new Set((S && S.achievements) || []);
       S = p;
+      // convert newly-granted admin burst charges into banked clicks (once each)
+      const seen = getBurstSeen();
+      if ((p.burstCharges || 0) > seen) {
+        burstClicksBanked += (p.burstCharges - seen) * 50;
+        setBurstSeen(p.burstCharges);
+      }
       renderAll();
       const fresh = (p.achievements || []).filter(a => !prevAch.has(a));
       // don't toast on first load
@@ -451,7 +462,7 @@
     comboTimer = setTimeout(() => { combo = 1; tapStreak = 0; renderAll(); }, 2000);
   }
 
-  core.addEventListener('pointerdown', (e) => {
+  function handleCoreTap(clientX, clientY) {
     if (!username || clicking || !S) return;
     clicking = true;
     bumpCombo();
@@ -467,9 +478,9 @@
       // update local snapshot cheaply (full refresh every few clicks)
       S.totalEarned += data.perClick || 0;
       burstClicksBanked++;
-      if (data.crit) { sndCrit(); floatText(e.clientX, e.clientY, 'CRIT ×5! +' + fmt(data.perClick), true); }
-      else { sndTap(); floatText(e.clientX, e.clientY, '+' + fmt(data.perClick), false); }
-      stardustBurst(e.clientX, e.clientY);
+      if (data.crit) { sndCrit(); floatText(clientX, clientY, 'CRIT ×5! +' + fmt(data.perClick), true); }
+      else { sndTap(); floatText(clientX, clientY, '+' + fmt(data.perClick), false); }
+      stardustBurst(clientX, clientY);
       if (data.newAchievements && data.newAchievements.length) {
         for (const a of data.newAchievements) if (!S.achievements.includes(a)) S.achievements.push(a);
         toastAchievements(data.newAchievements);
@@ -478,13 +489,18 @@
       renderAll();
     }).catch((err) => {
       if (String(err.message).includes('slow down')) {
-        floatText(e.clientX, e.clientY, 'whoa…', false);
+        floatText(clientX, clientY, 'whoa…', false);
       } else if (String(err.message).includes('Register')) {
         localStorage.removeItem('gc_username');
         location.reload();
       }
     }).finally(() => { clicking = false; });
-  });
+  }
+
+  core.addEventListener('pointerdown', (e) => { handleCoreTap(e.clientX, e.clientY); });
+  // center FAB in the curved tab bar — same tap logic, tappable from any tab
+  const coreFab = $('core-fab');
+  if (coreFab) coreFab.addEventListener('pointerdown', (e) => { handleCoreTap(e.clientX, e.clientY); });
 
   // ---------- stardust burst ----------
   $('burst-btn').addEventListener('click', () => {
@@ -592,20 +608,14 @@
       switch (cmd) {
         case 'help':
           cmdPrint('give <amt> · set stars <amt> · reset stars · reset all · max · shards <n>');
+          cmdPrint('max upgrades · set clicks <n> · unlock all · supernova now [n] · give burst <n>');
+          cmdPrint('ban <user> [reason] · unban <user> · wipe <user>');
           break;
         case 'give': {
           const amt = parseAmount(arg);
           if (amt == null || amt <= 0) { cmdPrint('usage: give <amount>  (e.g. give 500k)'); break; }
           const r = await adminFetch('/api/admin/give', { method: 'POST', body: JSON.stringify({ username, amount: amt }) });
           cmdPrint('gave ' + fmtFull(amt) + ' → ' + fmtFull(r.points) + ' stars');
-          break;
-        }
-        case 'set': {
-          const m = /^stars\s+(.+)$/i.exec(arg);
-          const amt = m && parseAmount(m[1]);
-          if (amt == null) { cmdPrint('usage: set stars <amount>'); break; }
-          const r = await adminFetch('/api/admin/set-stars', { method: 'POST', body: JSON.stringify({ username, amount: amt }) });
-          cmdPrint('stars set to ' + fmtFull(r.points));
           break;
         }
         case 'reset': {
@@ -620,8 +630,13 @@
           break;
         }
         case 'max': {
-          const r = await adminFetch('/api/admin/give', { method: 'POST', body: JSON.stringify({ username, amount: 1000000000000 }) });
-          cmdPrint('maxed → ' + fmtFull(r.points) + ' stars. go wild.');
+          if (/^upgrades$/i.test(arg)) {
+            const r = await adminFetch('/api/admin/max-upgrades', { method: 'POST', body: JSON.stringify({ username }) });
+            cmdPrint('all 10 upgrades → Lv 1000. per/sec: ' + fmtFull(Math.floor(r.perSecond)));
+          } else {
+            const r = await adminFetch('/api/admin/give', { method: 'POST', body: JSON.stringify({ username, amount: 1000000000000 }) });
+            cmdPrint('maxed → ' + fmtFull(r.points) + ' stars. go wild.');
+          }
           break;
         }
         case 'shards': {
@@ -629,6 +644,69 @@
           if (!n || n <= 0) { cmdPrint('usage: shards <n>'); break; }
           const r = await adminFetch('/api/admin/shards', { method: 'POST', body: JSON.stringify({ username, amount: n }) });
           cmdPrint('shards → ' + r.shards + ' total');
+          break;
+        }
+        case 'ban': {
+          const m = /^(\S+)(?:\s+(.*))?$/.exec(arg);
+          if (!m) { cmdPrint('usage: ban <user> [reason]'); break; }
+          await adminFetch('/api/admin/ban', { method: 'POST', body: JSON.stringify({ username: m[1], reason: m[2] || '' }) });
+          cmdPrint(m[1] + ' banned.' + (m[2] ? ' reason: ' + m[2] : ''));
+          break;
+        }
+        case 'unban': {
+          if (!arg) { cmdPrint('usage: unban <user>'); break; }
+          await adminFetch('/api/admin/unban', { method: 'POST', body: JSON.stringify({ username: arg }) });
+          cmdPrint(arg + ' unbanned.');
+          break;
+        }
+        case 'burst': {
+          const n = parseInt(arg, 10);
+          if (!n || n <= 0) { cmdPrint('usage: burst <n>  (grants n free stardust bursts)'); break; }
+          const r = await adminFetch('/api/admin/give-burst', { method: 'POST', body: JSON.stringify({ username, charges: n }) });
+          cmdPrint('burst charges → ' + r.burstCharges + ' total (' + n + ' free burst' + (n > 1 ? 's' : '') + ' banked)');
+          break;
+        }
+        case 'set': {
+          // extended: set stars <amt> | set clicks <n>
+          let m = /^stars\s+(.+)$/i.exec(arg);
+          if (m) {
+            const amt = parseAmount(m[1]);
+            if (amt == null) { cmdPrint('usage: set stars <amount>'); break; }
+            const r = await adminFetch('/api/admin/set-stars', { method: 'POST', body: JSON.stringify({ username, amount: amt }) });
+            cmdPrint('stars set to ' + fmtFull(r.points));
+            break;
+          }
+          m = /^clicks\s+(.+)$/i.exec(arg);
+          if (m) {
+            const n = parseAmount(m[1]);
+            if (n == null) { cmdPrint('usage: set clicks <n>'); break; }
+            await adminFetch('/api/admin/set-clicks', { method: 'POST', body: JSON.stringify({ username, clicks: n }) });
+            cmdPrint('clicks set to ' + fmtFull(n));
+            break;
+          }
+          cmdPrint('usage: set stars <amount> | set clicks <n>');
+          break;
+        }
+        case 'unlock': {
+          if (!/^all$/i.test(arg)) { cmdPrint('usage: unlock all'); break; }
+          await adminFetch('/api/admin/unlock-all', { method: 'POST', body: JSON.stringify({ username }) });
+          cmdPrint('all achievements unlocked.');
+          break;
+        }
+        case 'supernova': {
+          if (!/^now(?:\s+(\d+))?$/i.test(arg)) { cmdPrint('usage: supernova now [shards]'); break; }
+          const m = /^now(?:\s+(\d+))?$/i.exec(arg);
+          const body = { username };
+          if (m[1]) body.shards = parseInt(m[1], 10);
+          const r = await adminFetch('/api/admin/supernova-now', { method: 'POST', body: JSON.stringify(body) });
+          cmdPrint('supernova! +' + r.shardsGained + ' shards (×' + r.multiplier + ')');
+          break;
+        }
+        case 'wipe': {
+          if (!arg) { cmdPrint('usage: wipe <user>  (full data wipe)'); break; }
+          if (!confirm('Wipe ALL data for ' + arg + '?')) { cmdPrint('cancelled'); break; }
+          await adminFetch('/api/admin/reset-player', { method: 'POST', body: JSON.stringify({ username: arg }) });
+          cmdPrint(arg + ' wiped clean.');
           break;
         }
         default:

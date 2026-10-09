@@ -111,6 +111,59 @@
           <button id="warn-btn" class="btn-warn" type="button">Warn</button>
         </div>
         <button id="reset-btn" class="btn-danger" type="button">Full reset (wipes everything)</button>
+      </div>
+      <div class="power-section">
+        <h3>⚡ Powerful Commands</h3>
+        <div class="admin-actions">
+          <div class="action-row">
+            <button id="maxup-btn" type="button" style="flex:1">Max all upgrades (Lv 1000)</button>
+          </div>
+          <label>Give upgrade levels</label>
+          <div class="action-row">
+            <select id="upg-id">
+              <option value="stellar_gloves">✦ Stellar Gloves</option>
+              <option value="nebula_collector">◐ Nebula Collector</option>
+              <option value="comet_miner">☄ Comet Miner</option>
+              <option value="quantum_fingers">✣ Quantum Fingers</option>
+              <option value="pulsar_engine">◎ Pulsar Engine</option>
+              <option value="star_forge">⬢ Star Forge</option>
+              <option value="supernova_core">⬣ Supernova Core</option>
+              <option value="void_tap">✧ Void Tap</option>
+              <option value="black_hole">● Black Hole Harvester</option>
+              <option value="galaxy_swarm">✹ Galaxy Swarm</option>
+            </select>
+          </div>
+          <div class="action-row">
+            <input id="upg-lvls" type="number" min="1" step="1" placeholder="levels" inputmode="numeric">
+            <button id="upg-btn" class="btn-ghost" type="button">Give upgrade</button>
+          </div>
+          <label>Set total clicks</label>
+          <div class="action-row">
+            <input id="clicks-amt" type="number" min="0" step="1" placeholder="clicks" inputmode="numeric">
+            <button id="clicks-btn" class="btn-ghost" type="button">Set clicks</button>
+          </div>
+          <div class="action-row">
+            <button id="unlock-btn2" class="btn-ghost" type="button" style="flex:1">Unlock all achievements</button>
+          </div>
+          <label>Instant supernova (optional shards)</label>
+          <div class="action-row">
+            <input id="nova-shards" type="number" min="1" step="1" placeholder="shards (blank = auto)" inputmode="numeric">
+            <button id="nova-btn" class="btn-warn" type="button">Supernova now</button>
+          </div>
+          <label>Give stardust burst charges</label>
+          <div class="action-row">
+            <input id="burst-amt" type="number" min="1" step="1" placeholder="charges" inputmode="numeric">
+            <button id="burst-btn" class="btn-ghost" type="button">Give burst</button>
+          </div>
+          <label>Ban player (reason optional)</label>
+          <div class="action-row">
+            <input id="ban-reason" type="text" maxlength="300" placeholder="reason">
+            <button id="ban-btn" class="btn-danger" type="button">Ban</button>
+          </div>
+          <div class="action-row">
+            <button id="unban-btn" class="btn-ghost" type="button" style="flex:1">Unban player</button>
+          </div>
+        </div>
       </div>`;
     const uname = p.username;
 
@@ -170,6 +223,105 @@
           method: 'POST', body: JSON.stringify({ username: uname, amount: amt }),
         });
         alert(`Gave ${fmt(amt)} shards to ${uname}. Total: ${fmt(r.shards)}`);
+        findPlayer();
+      } catch (e) { alert(e.message); }
+    });
+
+    // ---------- powerful commands ----------
+    $('maxup-btn').addEventListener('click', async () => {
+      if (!confirm(`Max ALL 10 upgrades to Lv 1000 for ${uname}?`)) return;
+      try {
+        await admin('/api/admin/max-upgrades', {
+          method: 'POST', body: JSON.stringify({ username: uname }),
+        });
+        alert(`${uname}: all upgrades maxed to Lv 1000.`);
+        findPlayer();
+      } catch (e) { alert(e.message); }
+    });
+
+    $('upg-btn').addEventListener('click', async () => {
+      const upgradeId = $('upg-id').value;
+      const levels = parseInt($('upg-lvls').value, 10);
+      if (!levels || levels <= 0) { alert('Enter a positive number of levels.'); return; }
+      try {
+        await admin('/api/admin/give-upgrade', {
+          method: 'POST', body: JSON.stringify({ username: uname, upgradeId, levels }),
+        });
+        alert(`Gave ${fmt(levels)} levels of ${upgradeId} to ${uname}.`);
+        findPlayer();
+      } catch (e) { alert(e.message); }
+    });
+
+    $('clicks-btn').addEventListener('click', async () => {
+      const clicks = parseInt($('clicks-amt').value, 10);
+      if (clicks == null || clicks < 0 || !Number.isInteger(clicks)) {
+        alert('Enter a non-negative whole number.'); return;
+      }
+      try {
+        const r = await admin('/api/admin/set-clicks', {
+          method: 'POST', body: JSON.stringify({ username: uname, clicks }),
+        });
+        alert(`Set ${uname} to ${fmt(r.clicks)} clicks.`);
+        findPlayer();
+      } catch (e) { alert(e.message); }
+    });
+
+    $('unlock-btn2').addEventListener('click', async () => {
+      try {
+        await admin('/api/admin/unlock-all', {
+          method: 'POST', body: JSON.stringify({ username: uname }),
+        });
+        alert(`${uname}: all 8 achievements unlocked.`);
+        findPlayer();
+      } catch (e) { alert(e.message); }
+    });
+
+    $('nova-btn').addEventListener('click', async () => {
+      const shardsRaw = $('nova-shards').value.trim();
+      const shards = shardsRaw ? parseInt(shardsRaw, 10) : undefined;
+      if (shardsRaw && (!shards || shards <= 0)) { alert('Enter a positive shard count or leave blank.'); return; }
+      if (!confirm(`Instant supernova for ${uname}? Resets stars/upgrades, grants shards.`)) return;
+      try {
+        const body = { username: uname };
+        if (shards) body.shards = shards;
+        const r = await admin('/api/admin/supernova-now', {
+          method: 'POST', body: JSON.stringify(body),
+        });
+        alert(`${uname} went supernova! Shards gained: ${fmt(r.shardsGained || 0)}`);
+        findPlayer();
+      } catch (e) { alert(e.message); }
+    });
+
+    $('burst-btn').addEventListener('click', async () => {
+      const charges = parseInt($('burst-amt').value, 10);
+      if (!charges || charges <= 0) { alert('Enter a positive number of charges.'); return; }
+      try {
+        const r = await admin('/api/admin/give-burst', {
+          method: 'POST', body: JSON.stringify({ username: uname, charges }),
+        });
+        alert(`Gave ${fmt(charges)} burst charges to ${uname}. Total: ${fmt(r.burstCharges)}`);
+        findPlayer();
+      } catch (e) { alert(e.message); }
+    });
+
+    $('ban-btn').addEventListener('click', async () => {
+      const reason = $('ban-reason').value.trim();
+      if (!confirm(`BAN ${uname}? They will be locked out of the game.${reason ? '\nReason: ' + reason : ''}`)) return;
+      try {
+        await admin('/api/admin/ban', {
+          method: 'POST', body: JSON.stringify({ username: uname, reason }),
+        });
+        alert(`${uname} banned.`);
+        findPlayer();
+      } catch (e) { alert(e.message); }
+    });
+
+    $('unban-btn').addEventListener('click', async () => {
+      try {
+        await admin('/api/admin/unban', {
+          method: 'POST', body: JSON.stringify({ username: uname }),
+        });
+        alert(`${uname} unbanned.`);
         findPlayer();
       } catch (e) { alert(e.message); }
     });
