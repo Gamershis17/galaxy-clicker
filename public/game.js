@@ -498,9 +498,6 @@
   }
 
   core.addEventListener('pointerdown', (e) => { handleCoreTap(e.clientX, e.clientY); });
-  // center FAB in the curved tab bar — same tap logic, tappable from any tab
-  const coreFab = $('core-fab');
-  if (coreFab) coreFab.addEventListener('pointerdown', (e) => { handleCoreTap(e.clientX, e.clientY); });
 
   // ---------- stardust burst ----------
   $('burst-btn').addEventListener('click', () => {
