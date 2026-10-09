@@ -236,6 +236,7 @@
     gate.classList.add('hidden'); game.classList.remove('hidden');
     userChip.classList.remove('hidden'); userChipName.textContent = username;
     applySoundLabel();
+    switchTab(activeTab, false);
     refreshMe(); refreshBoard();
   }
 
@@ -655,6 +656,72 @@
     localStorage.setItem('gc_admin_key', k);
     cmdKeyRow.classList.add('hidden');
     cmdPrint('key saved.');
+  });
+
+  // ---------- tab navigation ----------
+  const TAB_IDS = ['game', 'upgrades', 'leaderboard'];
+  let activeTab = 'game';
+  try {
+    const saved = localStorage.getItem('gc_tab');
+    if (saved && TAB_IDS.indexOf(saved) !== -1) activeTab = saved;
+  } catch (e) {}
+  function switchTab(id, save) {
+    if (TAB_IDS.indexOf(id) === -1) return;
+    activeTab = id;
+    if (save !== false) {
+      try { localStorage.setItem('gc_tab', id); } catch (e) {}
+    }
+    for (const t of TAB_IDS) {
+      const panel = $('tab-' + t), btn = $('tabbtn-' + t);
+      if (panel) panel.classList.toggle('active', t === id);
+      if (btn) {
+        btn.classList.toggle('active', t === id);
+        btn.setAttribute('aria-selected', t === id ? 'true' : 'false');
+      }
+    }
+    if (id === 'leaderboard') refreshBoard();
+    window.scrollTo(0, 0);
+  }
+  for (const t of TAB_IDS) {
+    const btn = $('tabbtn-' + t);
+    if (btn) btn.addEventListener('click', () => switchTab(t));
+  }
+
+  // ---------- admin gear (key-gated shortcut to /admin.html) ----------
+  const keyModal = $('key-modal'), keyModalInput = $('key-modal-input'),
+        keyModalError = $('key-modal-error');
+  function openKeyModal() {
+    keyModalError.classList.add('hidden');
+    keyModalInput.value = localStorage.getItem('gc_admin_key') || '';
+    keyModal.classList.remove('hidden');
+    keyModalInput.focus();
+  }
+  function closeKeyModal() { keyModal.classList.add('hidden'); }
+  $('admin-gear').addEventListener('click', openKeyModal);
+  $('key-modal-cancel').addEventListener('click', closeKeyModal);
+  keyModal.addEventListener('click', (e) => { if (e.target === keyModal) closeKeyModal(); });
+  keyModalInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') $('key-modal-submit').click(); });
+  $('key-modal-submit').addEventListener('click', async () => {
+    const k = keyModalInput.value.trim();
+    keyModalError.classList.add('hidden');
+    if (!k) {
+      keyModalError.textContent = 'Enter your admin key.';
+      keyModalError.classList.remove('hidden');
+      return;
+    }
+    try {
+      const res = await fetch('/api/admin/alerts', { headers: { 'x-admin-key': k } });
+      if (res.status === 403) throw new Error('Wrong key. Try again.');
+      if (!res.ok) throw new Error('Server error (' + res.status + ')');
+      localStorage.setItem('gc_admin_key', k);
+      cmdKeyVal = k; // keep the inline admin commands in sync
+      const kr = $('cmd-key-row');
+      if (kr) kr.classList.add('hidden');
+      location.href = '/admin.html'; // auto-unlocks: admin.js reads gc_admin_key
+    } catch (e) {
+      keyModalError.textContent = e.message;
+      keyModalError.classList.remove('hidden');
+    }
   });
 
   // ---------- perf toggle ----------

@@ -2,7 +2,7 @@
  * Static assets: cache-first. API calls (/api/*): never cached (network-first pass-through). */
 'use strict';
 
-var CACHE_NAME = 'galaxy-clicker-v1';
+var CACHE_NAME = 'galaxy-clicker-v2';
 var STATIC_ASSETS = [
   '/',
   '/index.html',

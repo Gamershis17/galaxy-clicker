@@ -27,9 +27,12 @@
 
 <header class="topbar">
   <h1>🌌 Galaxy Clicker</h1>
-  <div id="user-chip" class="user-chip hidden">
-    <span id="user-chip-name"></span>
-    <button id="change-name" class="link-btn" type="button">change</button>
+  <div class="topbar-right">
+    <div id="user-chip" class="user-chip hidden">
+      <span id="user-chip-name"></span>
+      <button id="change-name" class="link-btn" type="button">change</button>
+    </div>
+    <button id="admin-gear" class="gear-btn" type="button" aria-label="Admin panel">⚙️</button>
   </div>
 </header>
 
@@ -48,6 +51,8 @@
 
   <!-- Game -->
   <section id="game" class="hidden">
+    <!-- Game tab -->
+    <div id="tab-game" class="tab-panel active">
     <!-- Stats dashboard: 2x2 grid -->
     <div class="stats-grid">
       <div class="stat-card">
@@ -119,23 +124,6 @@
       <div class="ach-grid" id="ach-grid"></div>
     </section>
 
-    <!-- Upgrades -->
-    <section class="card">
-      <div class="upg-head">
-        <div>
-          <h2>UPGRADES</h2>
-          <p class="muted">Costs rise 15% per level owned.</p>
-        </div>
-        <div class="buy-mode" role="group" aria-label="Buy amount">
-          <button class="mode-btn active" data-mode="1" type="button">×1</button>
-          <button class="mode-btn" data-mode="10" type="button">×10</button>
-          <button class="mode-btn" data-mode="max" type="button">MAX</button>
-        </div>
-      </div>
-      <div id="upg-list" class="upg-list"></div>
-      <p id="upg-error" class="error hidden"></p>
-    </section>
-
     <!-- Admin commands (Cody only — key-gated page) -->
     <section class="card admin-cmd-card">
       <div class="admin-cmd-head">
@@ -159,11 +147,56 @@
       <div id="cmd-out" class="cmd-out hidden"></div>
     </section>
 
-    <!-- Leaderboard -->
+    </div><!-- /tab-game -->
+
+    <!-- Upgrades tab -->
+    <div id="tab-upgrades" class="tab-panel">
+    <section class="card">
+      <div class="upg-head">
+        <div>
+          <h2>UPGRADES</h2>
+          <p class="muted">Costs rise 15% per level owned.</p>
+        </div>
+        <div class="buy-mode" role="group" aria-label="Buy amount">
+          <button class="mode-btn active" data-mode="1" type="button">×1</button>
+          <button class="mode-btn" data-mode="10" type="button">×10</button>
+          <button class="mode-btn" data-mode="max" type="button">MAX</button>
+        </div>
+      </div>
+      <div id="upg-list" class="upg-list"></div>
+      <p id="upg-error" class="error hidden"></p>
+    </section>
+    </div><!-- /tab-upgrades -->
+
+    <!-- Leaderboard tab -->
+    <div id="tab-leaderboard" class="tab-panel">
     <section class="card leaderboard">
       <h2>🏆 Top Clickers</h2>
       <ol id="leaderboard"></ol>
     </section>
+    </div><!-- /tab-leaderboard -->
+
+    <!-- Bottom tab bar -->
+    <nav id="tabbar" aria-label="Sections">
+      <button id="tabbtn-game" class="tab-btn active" type="button" aria-selected="true">🪐<span>Game</span></button>
+      <button id="tabbtn-upgrades" class="tab-btn" type="button" aria-selected="false">⚡<span>Upgrades</span></button>
+      <button id="tabbtn-leaderboard" class="tab-btn" type="button" aria-selected="false">🏆<span>Board</span></button>
+    </nav>
+
+    <!-- Admin key prompt -->
+    <div id="key-modal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Admin key">
+      <div class="modal-card">
+        <h2>🛡️ Admin</h2>
+        <p class="muted">Enter your admin key to open the admin panel.</p>
+        <input id="key-modal-input" type="text" placeholder="admin key" autocomplete="off"
+               autocapitalize="off" spellcheck="false">
+        <p id="key-modal-error" class="error hidden"></p>
+        <div class="row">
+          <button id="key-modal-cancel" class="btn-ghost" type="button">Cancel</button>
+          <button id="key-modal-submit" type="button">Open panel</button>
+        </div>
+      </div>
+    </div>
   </section>
 </main>
 
