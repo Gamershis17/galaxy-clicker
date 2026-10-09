@@ -210,18 +210,17 @@
     gateError.classList.add('hidden');
     try {
       await api('/api/register', { method: 'POST', body: JSON.stringify({ username: name }) });
-      username = name;
-      localStorage.setItem('gc_username', username);
-      showGame();
     } catch (e) {
-      if (e.message.includes('taken') && localStorage.getItem('gc_username') === name) {
-        username = name;
-        showGame();
+      if (!e.message.includes('taken')) {
+        gateError.textContent = e.message;
+        gateError.classList.remove('hidden');
         return;
       }
-      gateError.textContent = e.message;
-      gateError.classList.remove('hidden');
+      // username taken = existing player, just log in as them
     }
+    username = name;
+    localStorage.setItem('gc_username', username);
+    showGame();
   }
   playBtn.addEventListener('click', () => {
     const name = usernameInput.value.trim();
