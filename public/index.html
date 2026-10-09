@@ -7,10 +7,14 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<canvas id="stars" aria-hidden="true"></canvas>
-<div class="nebula nebula-1" aria-hidden="true"></div>
-<div class="nebula nebula-2" aria-hidden="true"></div>
-<div class="nebula nebula-3" aria-hidden="true"></div>
+<div id="bg" aria-hidden="true">
+  <div id="galaxy"></div>
+  <canvas id="stars"></canvas>
+  <div class="nebula nebula-1"></div>
+  <div class="nebula nebula-2"></div>
+  <div class="nebula nebula-3"></div>
+  <div id="dust"></div>
+</div>
 
 <div id="warn-banner" class="warn-banner hidden" role="alert"></div>
 
@@ -42,17 +46,22 @@
 
   <!-- Game -->
   <section id="game" class="hidden">
-    <div class="score-card">
+    <div class="score-card compact">
       <div class="points" id="points">0</div>
       <div class="points-label">points</div>
       <div class="rank-line muted" id="rank-line"></div>
-      <div class="rates muted" id="rates"></div>
     </div>
 
     <button id="clicker" type="button" aria-label="Click to earn points">
       <span class="planet">🪐</span>
     </button>
     <div id="click-hint" class="muted">Tap the planet!</div>
+
+    <div class="hero-tracker">
+      <div class="hero-points" id="hero-points">0</div>
+      <div class="points-label">points</div>
+      <div class="rates" id="rates"></div>
+    </div>
 
     <section class="card upgrades">
       <h2>⚡ Upgrades</h2>
