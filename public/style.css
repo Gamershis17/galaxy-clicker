@@ -345,7 +345,15 @@ body.perf #core .core-ring { animation: none; }
 .admin-actions { display: grid; gap: 10px; margin-top: 14px; }
 .admin-actions label { font-weight: 600; font-size: 0.92rem; color: var(--muted); }
 .action-row { display: flex; gap: 10px; }
-.action-row input { flex: 1; }
+.action-row input { flex: 1; min-width: 0; }
+.action-row button { flex-shrink: 0; white-space: nowrap; }
+@media (max-width: 480px) {
+  .action-row { flex-wrap: wrap; }
+  .action-row input { flex: 1 1 100%; }
+  .action-row button { flex: 1 1 auto; }
+  .admin-wrap { padding: 8px 10px 60px; overflow-x: hidden; }
+  .player-card { overflow-x: hidden; }
+}
 .btn-danger { background: linear-gradient(135deg, #ff5d7a, #c2185b); color: #fff; box-shadow: 0 0 18px rgba(255, 93, 122, 0.35); }
 .btn-warn { background: linear-gradient(135deg, #ffd700, #d4a017); color: #3a2a00; box-shadow: 0 0 18px rgba(255, 215, 0, 0.3); }
 .btn-ghost { background: rgba(0, 212, 255, 0.1); color: var(--text); box-shadow: none; border: 1px solid var(--card-border); }
