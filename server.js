@@ -520,7 +520,7 @@ app.post('/api/click', (req, res) => {
 app.get('/api/leaderboard', (req, res) => {
   const rows = Object.values(db.players)
     .map(p => ({ username: p.username, points: p.points, clicks: p.clicks }))
-    .sort((a, b) => (b.points - a.points) || (a.clicks - b.clicks))
+    .sort((a, b) => (b.clicks - a.clicks) || (b.points - a.points))
     .slice(0, 100);
   res.json({ leaders: rows });
 });
@@ -531,7 +531,7 @@ app.get('/api/player/:username', (req, res) => {
   if (!isValidUsername(name)) return res.status(400).json({ error: 'Invalid username.' });
   const player = getPlayer(norm(name));
   if (!player) return res.status(404).json({ error: 'Player not found.' });
-  const leaderboardRank = Object.values(db.players).filter(p => p.points > player.points).length + 1;
+  const leaderboardRank = Object.values(db.players).filter(p => p.clicks > player.clicks).length + 1;
   const snap = playerSnapshot(player);
   snap.leaderboardRank = leaderboardRank;
   snap.warnings = player.warn_count;
@@ -803,7 +803,7 @@ app.get('/api/admin/players', requireAdmin, (req, res) => {
   if (q) {
     rows = rows.filter(p => p.username.toLowerCase().includes(q));
   }
-  rows.sort((a, b) => b.points - a.points);
+  rows.sort((a, b) => b.clicks - a.clicks);
   res.json({ players: rows.slice(0, 50) });
 });
 
