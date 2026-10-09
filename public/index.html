@@ -3,7 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#0a0e27">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Galaxy Clicker">
 <title>🌌 Galaxy Clicker</title>
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/icon-192.png">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -164,8 +171,42 @@
   <span>Auto-clickers welcome. Score fakers get zeroed.</span>
   <br>
   <button id="perf-toggle" class="link-btn" type="button" aria-pressed="false">⚡ Performance mode</button>
+  <button id="install-btn" class="link-btn hidden" type="button">📲 Install App</button>
 </footer>
 
+<script>
+// PWA: service worker registration + install prompt
+(function () {
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('/sw.js').catch(function () { /* offline shell optional */ });
+    });
+  }
+  var deferredPrompt = null;
+  var installBtn = document.getElementById('install-btn');
+  window.addEventListener('beforeinstallprompt', function (e) {
+    e.preventDefault();
+    deferredPrompt = e;
+    if (installBtn) installBtn.classList.remove('hidden');
+  });
+  window.addEventListener('appinstalled', function () {
+    deferredPrompt = null;
+    if (installBtn) installBtn.classList.add('hidden');
+  });
+  if (installBtn) {
+    installBtn.addEventListener('click', function () {
+      if (!deferredPrompt) return;
+      deferredPrompt.prompt();
+      deferredPrompt.userChoice.then(function () { deferredPrompt = null; });
+    });
+  }
+  // Hide the install button if already installed (standalone mode)
+  if (window.matchMedia('(display-mode: standalone)').matches ||
+      window.navigator.standalone === true) {
+    if (installBtn) installBtn.classList.add('hidden');
+  }
+})();
+</script>
 <script src="game.js"></script>
 </body>
 </html>
