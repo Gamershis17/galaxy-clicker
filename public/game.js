@@ -758,7 +758,7 @@
   }
   for (const t of TAB_IDS) {
     const btn = $('tabbtn-' + t);
-    if (btn) btn.addEventListener('click', () => switchTab(t));
+    if (btn) btn.addEventListener('pointerdown', () => switchTab(t));
   }
 
   // ---------- admin gear (key-gated shortcut to /admin.html) ----------
